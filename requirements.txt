@@ -1,0 +1,5 @@
+opencv-python   # provides cv2
+Pillow          # provides PIL
+numpy
+tqdm
+loguru

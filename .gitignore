@@ -172,3 +172,10 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+.idea
+playground/*
+playground
+**/.DS_Store
+**/frames*
+src
