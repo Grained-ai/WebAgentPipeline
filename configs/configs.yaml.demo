@@ -1,0 +1,8 @@
+VLM:
+  zhipu:
+    endpoint: "https://open.bigmodel.cn/api/paas/v4/"
+    api_key: xxxxx
+    default_model_name: "glm-4v-flash"
+ChromeDriver:
+  driver_executable_path:
+  version_main:

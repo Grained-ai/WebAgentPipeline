@@ -1,4 +1,8 @@
+import glob
+import traceback
 from pathlib import Path
+
+import tqdm
 from loguru import logger
 import json
 import random
@@ -18,6 +22,9 @@ FLOW_PROCESSES = [
 STEP_PROCESSES = [
     'step_process_extract_frame',
     'step_process_label_bbox',
+    'step_process_step_chinese2english',
+    'step_process_step_type_mapping',
+    'step_process_update_imgSave_to_marked_screenshot'
 ]
 
 
@@ -30,7 +37,8 @@ class QCException(Exception):
 
 
 class JSONAutoQC:
-    def __init__(self, json_path):
+    def __init__(self, json_path, legacy_image_dir=None):
+        self.legacy_image_dir = legacy_image_dir
         self.storage_path = Path(json_path).parent
         self.json_path = Path(json_path)
 
@@ -140,19 +148,50 @@ class JSONAutoQC:
             step_content['screenshot'] = None
             return step_content
 
+        # Legacy image support
+
+        if self.legacy_image_dir:
+            saved_image = step_content.get('imgSave')
+            if saved_image:
+                image_path_parts = saved_image.split('/')[3:]
+                file_path = Path(self.legacy_image_dir) / os.path.join(*image_path_parts)
+                logger.info(f"Checking {file_path}")
+                if file_path.exists():
+                    step_content['screenshot'] = str(file_path.absolute())
+                    logger.success(f'Detected imgSave legacy image {file_path}. Set to screenshot.')
+                    return step_content
+                else:
+                    # TODO: Refactoring
+                    legacy_image_dir = (Path(self.legacy_image_dir) / os.path.join(*image_path_parts)).parent
+                    legacy_image_candidates = glob.glob(f'{step_id}_marked*.jpeg', root_dir=Path(legacy_image_dir))
+                    if legacy_image_candidates:
+                        for legacy_image_path in legacy_image_candidates:
+                            legacy_image_path = Path(legacy_image_dir) / legacy_image_path
+                            if legacy_image_path.exists():
+                                step_content['screenshot'] = str(legacy_image_path.absolute())
+                                logger.success(f'Detected legacy image {legacy_image_path}. Set to screenshot.')
+                                return step_content
+
+            legacy_image_candidates = glob.glob(f'{step_id}_marked*.jpeg', root_dir=Path(self.legacy_image_dir))
+            if legacy_image_candidates:
+                for legacy_image_path in legacy_image_candidates:
+                    legacy_image_path = Path(self.legacy_image_dir) / legacy_image_path
+                    if legacy_image_path.exists():
+                        step_content['screenshot'] = str(legacy_image_path.absolute())
+                        logger.success(f'Detected legacy image {legacy_image_path}. Set to screenshot.')
+                        return step_content
         # 获取时间戳
         timestamp = step_content['timestamp']
         created_time = step_content.get('createdTime', 0)
-        logger.info(f"\n处理步骤 {step_content['id']}:")
+        logger.info(f"处理步骤 {step_content['id']}:")
         logger.info(f"操作类型: {step_content['type']}")
         logger.info(f"时间戳: {timestamp}ms")
 
         # 处理负时间戳的情况
         is_negative_timestamp = timestamp < 0
 
-        frame_output_path = self.storage_path / 'frames_raw' / f"{step_id}_raw.jpeg"
         scaled_frame_output_path = self.storage_path / 'frames_raw' / f"{step_id}_scaled{'2' if is_negative_timestamp else ''}.jpeg"
-        if frame_output_path.exists() and scaled_frame_output_path.exists():
+        if scaled_frame_output_path.exists():
             logger.warning(f'Step: {step_id} already extracted frame at {scaled_frame_output_path}')
             step_content['screenshot'] = str(scaled_frame_output_path.relative_to(self.storage_path))
             return step_content
@@ -180,7 +219,7 @@ class JSONAutoQC:
             return step_content
         webm_video_path = self.storage_path / f"{recording_id}.webm"
         mp4_video_path = self.storage_path / f"{recording_id}.mp4"
-        if not webm_video_path:
+        if not webm_video_path.exists():
             raise QCException.StepException(
                 f"Step: {step_content.get('id')} missing Recording. RecordID: {recording_id}")
         if not mp4_video_path.exists():
@@ -189,7 +228,7 @@ class JSONAutoQC:
                 convert_webm_to_mp4(webm_video_path, mp4_video_path)
             except Exception as e:
                 raise QCException.StepException(
-                    f"Step: {step_content.get('id')} Recording failed to convert. RecordID: {recording_id}")
+                    f"Step: {step_content.get('id')} Recording failed to convert {str(e)}. RecordID: {recording_id}")
 
         # 获取截图
         frame_output_path = self.storage_path / 'frames_raw' / f"{step_id}_raw.jpeg"
@@ -232,7 +271,7 @@ class JSONAutoQC:
         if not screenshot_path:
             logger.warning(f"No screenshot for STEP: {step_id}")
             return step_content
-        screenshot_path = self.storage_path/Path(screenshot_path)
+        screenshot_path = self.storage_path / Path(screenshot_path)
         if not screenshot_path.exists():
             logger.error(f"Step frame not retrieved for {step_type} {step_id}. Path {screenshot_path} doesnt exists.")
             step_content['screenshot'] = None
@@ -240,7 +279,7 @@ class JSONAutoQC:
         device_pixel_ratio = step_content.get('devicePixelRatio', 1)
         browser_top_height = int(step_content.get('browserTopHeight', 0))
         rect = step_content.get('rect')
-        if rect:
+        if rect and step_type not in ['press_enter', 'back', 'cache', 'paste']:
             adjusted_rect = {
                 'left': int(rect['left'] * device_pixel_ratio),
                 'top': int((rect['top'] + browser_top_height) * device_pixel_ratio),
@@ -263,6 +302,80 @@ class JSONAutoQC:
         cv2.imwrite(output_path, frame)
         logger.success(f"STEP: {step_id} BBOX marked: {output_path}")
         step_content['marked_screenshot'] = str(output_path.relative_to(self.storage_path))
+        return step_content
+
+    def step_process_step_type_mapping(self, step_content):
+        step_id = step_content.get("id")
+        step_type = step_content.get('type')
+        screenshot_path = step_content.get('screenshot')
+        current_title = step_content.get('title')
+        prev_title = step_content.get('title')
+        if step_type == 'type':
+            if not prev_title:
+                current_title = f"Type in {step_content.get('value')}"
+            else:
+                current_title = prev_title.replace('Input', 'Type in')
+            logger.warning(f'[Update]: {prev_title} -> {current_title}')
+        elif step_type == 'paste':
+            if not prev_title:
+                current_title = f"Type in {step_content.get('value')}"
+            else:
+                current_title = f"Type in {step_content.get('value')}"  # TODO: After Chinese->English mapping, do replace;
+            step_content['type'] = 'type'
+            logger.warning(f'[Update]: {prev_title} -> {current_title}')
+
+        elif step_type == 'hover':
+            if not prev_title:
+                current_title = f"Hover over {step_content.get('value')}"
+            else:
+                current_title = f"Hover over {step_content.get('value')}"  # TODO: After Chinese->English mapping, do replace;
+            logger.warning(f'[Update]: {prev_title} -> {current_title}')
+        step_content['title'] = current_title
+        if current_title.upper().startswith('ANSWER'):
+            logger.warning(f"[Type Update]: {step_type} -> answer")
+            step_content['type'] = 'answer'
+        return step_content
+
+    def step_process_step_chinese2english(self, step_content):
+        step_id = step_content.get("id")
+        step_type = step_content.get('type')
+        screenshot_path = step_content.get('screenshot')
+        current_title = step_content.get('title')
+        prev_title = step_content.get('title')
+
+        if "局部" in current_title:
+            if current_title == '局部向上滚动':
+                current_title = 'Scroll up the boxed part'
+            elif current_title == '局部向下滚动':
+                current_title = 'Scroll down the boxed part'
+            else:
+                logger.warning(f"Unknown 局部 step title. {current_title}")
+            logger.warning(f'[Update]: {prev_title} -> {current_title}')
+
+        if '滚动' in current_title:
+            if current_title == '向上滚动':
+                current_title = 'Scroll up the whole screen'
+            elif current_title == '向下滚动':
+                current_title = 'Scroll down the whole screen'
+            else:
+                logger.warning(f"Unknown 滚动 step title. {current_title}")
+            logger.warning(f'[Update]: {prev_title} -> {current_title}')
+
+        if any('\u4e00' <= ch <= '\u9fff' for ch in current_title):
+            logger.warning("Will do Chinese2English")
+            current_title = f"{step_type.capitalize()} {step_content.get('value') if step_content.get('value') else current_title[2:].strip()}"
+            logger.warning(f'[Update]: {prev_title} -> {current_title}')
+
+        step_content['title'] = current_title
+        return step_content
+
+    def step_process_update_imgSave_to_marked_screenshot(self, step_content):
+        marked_screenshot_rel_path = step_content.get("marked_screenshot")
+        if marked_screenshot_rel_path:
+            marked_screenshot_path = self.storage_path/marked_screenshot_rel_path
+            if marked_screenshot_path.exists():
+                step_content['imgSave'] = "http://3.145.59.104/submitjson/"+marked_screenshot_rel_path
+                logger.success(f"[ImgSave Updated] -> {step_content['imgSave']}")
         return step_content
 
     def flow_process_check_and_add_end_step(self, flow_content):
@@ -348,36 +461,40 @@ class JSONAutoQC:
     def main(self):
         with open(self.json_path, 'r') as f:
             instruction_flows = json.load(f)
-        for flow_content in instruction_flows:
+        for flow_content in tqdm.tqdm(instruction_flows):  # TODO: Refactor flow-wise process calling logic
             prev_flow_content = flow_content.copy()
-            for flow_process in FLOW_PROCESSES:
+            for idx, flow_process in enumerate(FLOW_PROCESSES):
+                logger.info(f"[FLOW-PROCESS] {idx}. {flow_process}")
                 try:
                     flow_content = self.__getattribute__(flow_process)(flow_content)
                     prev_flow_content = flow_content.copy()
                 except Exception as e:
-                    logger.error(str(e))
+                    logger.error(traceback.print_exc())
                     logger.warning("Flow content will revert to previous step")
                     flow_content = prev_flow_content
-            del prev_flow_content
+            del prev_flow_content  # TODO: Check Memory clearing performance. Figure out more pythonic way to do this
             modified_steps = []
-            for step_json in flow_content.get('steps'):
+            for step_json in flow_content.get('steps'):  # TODO: Refactor step-wise process calling logic
                 prev_step_json = step_json.copy()
-                for step_process in STEP_PROCESSES:
+                for idx, step_process in enumerate(STEP_PROCESSES):
+                    logger.info(f"[STEP-PROCESS] {idx}. {step_process}")
                     try:
                         step_json = self.__getattribute__(step_process)(step_json)
                         prev_step_json = step_json.copy()
                     except Exception as e:
-                        logger.error(str(e))
+                        logger.error(traceback.print_exc())
                         logger.warning("Flow content will revert to previous step")
                         step_json = prev_step_json
                 modified_steps.append(step_json)
                 del prev_step_json
             flow_content['steps'] = modified_steps
-            logger.success("Flow steps updated.")
-        with open(self.json_path, 'w') as f:
+        with open(self.json_path.parent / str(self.json_path.stem + '_updated.json'), 'w') as f:
             json.dump(instruction_flows, f, indent=4, ensure_ascii=False)
+        logger.success(f"---- Flow {self.json_path} steps updated. ----")
+
 
 if __name__ == "__main__":
-    demo_json = "/Users/anthonyf/projects/grainedAI/WebAgentPipeline/src/sample_1/sample.json"
-    ins = JSONAutoQC(demo_json)
+    demo_json = "/Users/anthonyf/projects/grainedAI/WebAgentPipeline/src/sample_2_major_error/sample.json"
+    legacy_image_path = "/Users/anthonyf/projects/grainedAI/WebAgentPipeline/src/sample_2_major_error/[好运来][temu]066"
+    ins = JSONAutoQC(demo_json, legacy_image_path)
     ins.main()

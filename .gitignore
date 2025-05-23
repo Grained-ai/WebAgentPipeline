@@ -179,3 +179,4 @@ playground
 **/.DS_Store
 **/frames*
 src
+**/*.yaml
