@@ -1,6 +1,3 @@
-import yaml
-from pathlib import Path
-from configs import *
 from loguru import logger
 from langchain_openai import ChatOpenAI
 try:
@@ -19,7 +16,7 @@ class LLMFactory:
 
     @staticmethod
     def create_llm_instance(vendor=DEFAULT_VENDOR, model_name=LLM_DEFAULT_MODEL_NAME, temperature=0.95):
-        with open(Path(__file__).parent.parent / 'configs' / 'configs.yaml', 'r') as f:
+        with open(Path(__file__).parent.parent.parent / 'configs' / 'configs.yaml', 'r') as f:
             config = yaml.safe_load(f)
 
         if model_name is None:
@@ -40,7 +37,7 @@ class LLMFactory:
 
     @staticmethod
     def create_vllm_instance(vendor=DEFAULT_VENDOR, model_name=VLM_DEFAULT_MODEL_NAME, temperature=0.95):
-        with open(Path(__file__).parent.parent / 'configs' / 'configs.yaml', 'r') as f:
+        with open(Path(__file__).parent.parent.parent / 'configs' / 'configs.yaml', 'r') as f:
             config = yaml.safe_load(f)
 
         return ChatOpenAI(

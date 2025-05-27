@@ -1,0 +1,11 @@
+# Task
+我会给你一个操作步骤的描述和一个操作页面的截图。你需要给我英文的操作描述。
+
+操作步骤的描述通常由三个部分组成，action, object and action_goal
+
+操作页面的截图是执行该操作步骤时的截图。图中还会用红框框出操作的元素（如果有的话）。请结合现有的描述和截图，补充完整步骤的描述。
+
+用JSON的格式返回给我各个部分，参照OUTPUT_SCHEMA部分的描述
+
+# OUTPUT_SCHEMA
+{format_instructions}

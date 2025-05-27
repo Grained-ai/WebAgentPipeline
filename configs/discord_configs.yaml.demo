@@ -1,8 +1,0 @@
-accounts:
-- authorization: xxxx
-  discord_pwd: xxxx
-  discord_usr: xxxx
-  last_sents:
-    "xxx": "xxx"  # 频道ID和消息最后发送时间
-  mail: xxx@xxx.xx
-  mail_pwd: xxxx

@@ -9,3 +9,10 @@ with open(local_config_path, 'r') as f:
 DEFAULT_VENDOR = "zhipu"
 VLM_DEFAULT_MODEL_NAME = configs.get("VLM", {}).get(DEFAULT_VENDOR, {}).get("default_model_name")
 LLM_DEFAULT_MODEL_NAME = configs.get("LLM", {}).get(DEFAULT_VENDOR, {}).get("default_model_name")
+
+DEFAULT_VIEWPORT = {'width': 1050, 'height': 759}
+
+STORAGE_PATH = configs.get('QCPipeline', {}).get('StoragePath')
+
+DEFAULT_FLOW_CHECKS = configs.get('QCPipeline', {}).get('Main', {}).get('flow_checks', [])
+DEFAULT_STEP_CHECKS = configs.get('QCPipeline', {}).get('Main', {}).get('step_checks', [])

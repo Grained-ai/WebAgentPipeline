@@ -1,0 +1,23 @@
+# Task
+我会给你一个WebAgent的指令，你需要帮我判断指令是否包含“跳转到指定网站”的操作。
+下面会给你一些例子，你需要返回True/False 和 判断理由。按照OUTPUT_SCHEMA返回我JSON
+
+# Example
+1. 指令：Filter the search results to show only properties that are "Entire homes" with at least 3 bedrooms and 2 bathrooms.
+该指令不包含“跳转指定网站”的操作。返回False。
+2. 指令：Open the 'https://www.opentable.com/' and open a restaurant website for 2 people scheduled for April 20, 12:00pm and open the third one in the search results to view in Los Angeles
+该指令包含“跳转指定网站”的操作，他让跳转到https://www.opentable.com/。返回True
+3. 指令：Retweet the latest post from the account “@NASA” and comment: “Amazing discoveries! #Space”.
+该指令不包含“跳转指定网站”的操作。返回False
+4. 指令：Open the OpenTable website, choose a restaurant in Los angeles with the Highest rated, and quote its overview.
+该指令包含“跳转指定网站”的操作，虽然没有指明具体网址，但是告诉了网站名称。会跳转到https://www.opentable.com/。返回True
+5. 指令：Help me find newborn diapers on Target priced between $50 and $100, I don't mind paying a little more for comfort
+该指令包含“跳转指定网站”的操作，虽然没有指明具体网址，但是能推测出是要去Target官网。会跳转到http://target.com//。返回True
+
+# OUTPUT_SCHEMA
+{format_instructions}
+
+# INPUT
+指令：{instruction}
+
+YOUR ANSWER:

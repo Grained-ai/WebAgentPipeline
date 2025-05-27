@@ -1,4 +1,3 @@
-import glob
 import traceback
 from pathlib import Path
 
@@ -11,7 +10,7 @@ import cv2
 import os
 from PIL import Image, ImageDraw
 import numpy as np
-from modules.utils import convert_webm_to_mp4, get_video_duration_ms, extract_frame_at_timestamp
+from modules.media_utils.video_ops import convert_webm_to_mp4, get_video_duration_ms
 
 DEFAULT_VIEWPORT = {'width': 1050, 'height': 759}
 FLOW_PROCESSES = [
@@ -139,202 +138,6 @@ class JSONAutoQC:
         if not step_type:
             raise QCException.StepException(f'Step {step_id} missing type.')
 
-    def step_process_extract_frame(self, step_content):
-        step_id = step_content.get("id")
-        step_type = step_content.get('type')
-        # 跳过没有timestamp的步骤（如launchApp等）
-        if 'timestamp' not in step_content:
-            logger.warning(f"No screenshot for {step_id}: {step_type}")
-            step_content['screenshot'] = None
-            return step_content
-
-        # Legacy image support
-
-        if self.legacy_image_dir:
-            saved_image = step_content.get('imgSave')
-            if saved_image:
-                image_path_parts = saved_image.split('/')[3:]
-                file_path = Path(self.legacy_image_dir) / os.path.join(*image_path_parts)
-                logger.info(f"Checking {file_path}")
-                if file_path.exists():
-                    step_content['screenshot'] = str(file_path.absolute())
-                    logger.success(f'Detected imgSave legacy image {file_path}. Set to screenshot.')
-                    return step_content
-                else:
-                    # TODO: Refactoring
-                    legacy_image_dir = (Path(self.legacy_image_dir) / os.path.join(*image_path_parts)).parent
-                    legacy_image_candidates = glob.glob(f'{step_id}_marked*.jpeg', root_dir=Path(legacy_image_dir))
-                    if legacy_image_candidates:
-                        for legacy_image_path in legacy_image_candidates:
-                            legacy_image_path = Path(legacy_image_dir) / legacy_image_path
-                            if legacy_image_path.exists():
-                                step_content['screenshot'] = str(legacy_image_path.absolute())
-                                logger.success(f'Detected legacy image {legacy_image_path}. Set to screenshot.')
-                                return step_content
-
-            legacy_image_candidates = glob.glob(f'{step_id}_marked*.jpeg', root_dir=Path(self.legacy_image_dir))
-            if legacy_image_candidates:
-                for legacy_image_path in legacy_image_candidates:
-                    legacy_image_path = Path(self.legacy_image_dir) / legacy_image_path
-                    if legacy_image_path.exists():
-                        step_content['screenshot'] = str(legacy_image_path.absolute())
-                        logger.success(f'Detected legacy image {legacy_image_path}. Set to screenshot.')
-                        return step_content
-        # 获取时间戳
-        timestamp = step_content['timestamp']
-        created_time = step_content.get('createdTime', 0)
-        logger.info(f"处理步骤 {step_content['id']}:")
-        logger.info(f"操作类型: {step_content['type']}")
-        logger.info(f"时间戳: {timestamp}ms")
-
-        # 处理负时间戳的情况
-        is_negative_timestamp = timestamp < 0
-
-        scaled_frame_output_path = self.storage_path / 'frames_raw' / f"{step_id}_scaled{'2' if is_negative_timestamp else ''}.jpeg"
-        if scaled_frame_output_path.exists():
-            logger.warning(f'Step: {step_id} already extracted frame at {scaled_frame_output_path}')
-            step_content['screenshot'] = str(scaled_frame_output_path.relative_to(self.storage_path))
-            return step_content
-
-        if is_negative_timestamp:
-            # 使用负时间戳作为base值
-            base = timestamp
-            # 计算新的时间戳（createdTime + base - 50ms）
-            actual_timestamp = created_time + base - 50
-            logger.warning(
-                f"检测到负时间戳，使用createdTime({created_time}) + base({base}) - 50ms = {actual_timestamp}ms")
-            timestamp = actual_timestamp
-
-        # 获取viewport信息（如果有）
-        if 'viewport' in step_content:
-            viewport = step_content['viewport']
-        else:
-            viewport = DEFAULT_VIEWPORT  # 默认值
-
-        # 获取video
-        recording_id = step_content.get('recordingId')
-        if not recording_id:
-            logger.warning(f"Step {step_id} doesnt have recordID.")
-            step_content['screenshot'] = None
-            return step_content
-        webm_video_path = self.storage_path / f"{recording_id}.webm"
-        mp4_video_path = self.storage_path / f"{recording_id}.mp4"
-        if not webm_video_path.exists():
-            raise QCException.StepException(
-                f"Step: {step_content.get('id')} missing Recording. RecordID: {recording_id}")
-        if not mp4_video_path.exists():
-            logger.warning(f"Step: {step_content.get('id')} recording not converted. RecordID: {recording_id}")
-            try:
-                convert_webm_to_mp4(webm_video_path, mp4_video_path)
-            except Exception as e:
-                raise QCException.StepException(
-                    f"Step: {step_content.get('id')} Recording failed to convert {str(e)}. RecordID: {recording_id}")
-
-        # 获取截图
-        frame_output_path = self.storage_path / 'frames_raw' / f"{step_id}_raw.jpeg"
-        frame = extract_frame_at_timestamp(mp4_video_path, timestamp, frame_output_path)
-        if frame is None:
-            raise QCException.StepException(
-                f"Step: {step_content.get('id')} Failed to extract frame at {timestamp} from {mp4_video_path.absolute()}. RecordID: {recording_id}")
-        if not frame.any():
-            raise QCException.StepException(
-                f"Step: {step_content.get('id')} Failed to extract frame at {timestamp}. RecordID: {recording_id}")
-        # 获取设备像素比和浏览器顶部高度
-        device_pixel_ratio = step_content.get('devicePixelRatio', 1)
-
-        # 计算目标宽度和保持比例的高度
-        target_width = int(viewport['width'] * device_pixel_ratio)
-        # 获取原始图像的宽高
-        orig_height, orig_width = frame.shape[:2]
-        # 计算缩放比例
-        scale_ratio = target_width / orig_width
-        # 计算目标高度，保持原始宽高比
-        target_height = int(orig_height * scale_ratio)
-
-        logger.info(f"原始尺寸: {orig_width}x{orig_height} 像素")
-        logger.info(f"目标尺寸: {target_width}x{target_height} 像素 (等比例缩放)")
-
-        # 缩放图片
-        frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        frame_resized = frame_pil.resize((target_width, target_height), Image.Resampling.LANCZOS)
-        frame = cv2.cvtColor(np.array(frame_resized), cv2.COLOR_RGB2BGR)
-
-        cv2.imwrite(scaled_frame_output_path, frame.copy())  # 使用 .copy() 防止后续修改影响原图
-        logger.success(f"保存原始调整尺寸的截图: {scaled_frame_output_path}")
-        step_content['screenshot'] = str(scaled_frame_output_path.relative_to(self.storage_path))
-        return step_content
-
-    def step_process_label_bbox(self, step_content):
-        step_id = step_content.get("id")
-        step_type = step_content.get('type')
-        screenshot_path = step_content.get('screenshot')
-        if not screenshot_path:
-            logger.warning(f"No screenshot for STEP: {step_id}")
-            return step_content
-        screenshot_path = self.storage_path / Path(screenshot_path)
-        if not screenshot_path.exists():
-            logger.error(f"Step frame not retrieved for {step_type} {step_id}. Path {screenshot_path} doesnt exists.")
-            step_content['screenshot'] = None
-        frame = cv2.imread(screenshot_path)
-        device_pixel_ratio = step_content.get('devicePixelRatio', 1)
-        browser_top_height = int(step_content.get('browserTopHeight', 0))
-        rect = step_content.get('rect')
-        if rect and step_type not in ['press_enter', 'back', 'cache', 'paste']:
-            adjusted_rect = {
-                'left': int(rect['left'] * device_pixel_ratio),
-                'top': int((rect['top'] + browser_top_height) * device_pixel_ratio),
-                'right': int(rect['right'] * device_pixel_ratio),
-                'bottom': int((rect['bottom'] + browser_top_height) * device_pixel_ratio)
-            }
-        else:
-            adjusted_rect = None
-
-        if step_type.upper() != "END":
-            # 标记点击位置和元素区域
-            frame = self.mark_click_position(frame, None, None, adjusted_rect)
-
-        # 保存截图
-        timestamp = step_content['timestamp']
-        is_negative_timestamp = timestamp < 0
-        output_path = self.storage_path / 'frames_marked' / f"{step_id}_marked{'2' if is_negative_timestamp else ''}.jpeg"
-        if not output_path.parent.exists():
-            os.makedirs(output_path.parent, exist_ok=True)
-        cv2.imwrite(output_path, frame)
-        logger.success(f"STEP: {step_id} BBOX marked: {output_path}")
-        step_content['marked_screenshot'] = str(output_path.relative_to(self.storage_path))
-        return step_content
-
-    def step_process_step_type_mapping(self, step_content):
-        step_id = step_content.get("id")
-        step_type = step_content.get('type')
-        screenshot_path = step_content.get('screenshot')
-        current_title = step_content.get('title')
-        prev_title = step_content.get('title')
-        if step_type == 'type':
-            if not prev_title:
-                current_title = f"Type in {step_content.get('value')}"
-            else:
-                current_title = prev_title.replace('Input', 'Type in')
-            logger.warning(f'[Update]: {prev_title} -> {current_title}')
-        elif step_type == 'paste':
-            if not prev_title:
-                current_title = f"Type in {step_content.get('value')}"
-            else:
-                current_title = f"Type in {step_content.get('value')}"  # TODO: After Chinese->English mapping, do replace;
-            step_content['type'] = 'type'
-            logger.warning(f'[Update]: {prev_title} -> {current_title}')
-
-        elif step_type == 'hover':
-            if not prev_title:
-                current_title = f"Hover over {step_content.get('value')}"
-            else:
-                current_title = f"Hover over {step_content.get('value')}"  # TODO: After Chinese->English mapping, do replace;
-            logger.warning(f'[Update]: {prev_title} -> {current_title}')
-        step_content['title'] = current_title
-        if current_title.upper().startswith('ANSWER'):
-            logger.warning(f"[Type Update]: {step_type} -> answer")
-            step_content['type'] = 'answer'
-        return step_content
 
     def step_process_step_chinese2english(self, step_content):
         step_id = step_content.get("id")
@@ -495,6 +298,6 @@ class JSONAutoQC:
 
 if __name__ == "__main__":
     demo_json = "/Users/anthonyf/projects/grainedAI/WebAgentPipeline/src/sample_2_major_error/sample.json"
-    legacy_image_path = "/Users/anthonyf/projects/grainedAI/WebAgentPipeline/src/sample_2_major_error/[好运来][temu]066"
+    legacy_image_path = "/src/sample_2_major_error/[好运来][temu]066"
     ins = JSONAutoQC(demo_json, legacy_image_path)
     ins.main()

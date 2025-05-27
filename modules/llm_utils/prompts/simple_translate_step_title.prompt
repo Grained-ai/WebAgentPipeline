@@ -1,0 +1,16 @@
+# Task
+我会给你一个操作步骤的描述，你需要帮我把它的各部分翻译成英文。
+
+操作步骤的描述通常由两个部分组成，action 和 object。例如：click 通知栏，click就是action，通知栏就是object
+
+翻译的结果可以为：click the noticeboard.
+
+用JSON的格式返回给我各个部分，参照OUTPUT_SCHEMA部分的描述
+
+# OUTPUT_SCHEMA
+{format_instructions}
+
+# INPUT
+操作步骤描述：{step_title}
+
+YOUR ANSWER:
