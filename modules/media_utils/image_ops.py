@@ -32,7 +32,7 @@ def mark_click_position(image, x, y, rect=None, radius=10):
         overlay = Image.new('RGBA', pil_image.size, (0, 0, 0, 0))
         draw_overlay = ImageDraw.Draw(overlay)
         draw_overlay.rectangle([left, top, right, bottom],
-                               outline='red',
+                               outline='green',
                                width=2,
                                fill=(255, 0, 0, 30))  # 半透明红色填充
         # 将半透明层合并到原图
@@ -45,3 +45,21 @@ def encode_image(image_path):
     """将图像转换为 Base64 编码"""
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
+
+def mark_redo_bbox(image, annotations):
+    """
+    根据 ratio 信息将标注矩形画到图像上。
+    """
+    draw = ImageDraw.Draw(image)
+    img_w, img_h = image.size
+
+    for ann in annotations:
+        if ann.get("type") == "rect":
+            # 从比例还原为实际像素
+            x1 = ann["xRatio"] * img_w
+            y1 = ann["yRatio"] * img_h
+            x2 = x1 + (ann["widthRatio"] * img_w)
+            y2 = y1 + (ann["heightRatio"] * img_h)
+
+            draw.rectangle([x1, y1, x2, y2], outline="red", width=3)
+    return image

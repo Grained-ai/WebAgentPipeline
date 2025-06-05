@@ -1,5 +1,4 @@
-import os
-
+import numpy as np
 import cv2
 import subprocess
 from pathlib import Path
@@ -7,48 +6,216 @@ import json
 from loguru import logger
 
 
-def convert_webm_to_mp4(webm_path, mp4_path):
-    """使用 ffmpeg 将 .webm 转换为 .mp4（加速随机访问）"""
+# def convert_webm_to_mp4(webm_path, mp4_path):
+#     """使用 ffmpeg 将 .webm 转换为 .mp4（加速随机访问）"""
+#     cmd = [
+#         'ffmpeg',
+#         '-y',  # overwrite output
+#         '-i', str(webm_path),
+#         '-c:v', 'libx264',
+#         '-preset', 'ultrafast',
+#         '-pix_fmt', 'yuv420p',
+#         str(mp4_path)
+#     ]
+#     logger.debug(f"-> {' '.join(cmd)}")
+#     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+#
+#
+# def extract_frame_at_timestamp(video_path, timestamp_ms, output_image_path):
+#     """从视频中提取指定时间点的帧，单位为毫秒"""
+#     cap = cv2.VideoCapture(str(video_path))
+#     cap.set(cv2.CAP_PROP_POS_MSEC, timestamp_ms)
+#     success, frame = cap.read()
+#     if success:
+#         if not output_image_path.exists():
+#             os.makedirs(output_image_path.parent, exist_ok=True)
+#         cv2.imwrite(str(output_image_path), frame)
+#     cap.release()
+#     return frame
+#
+def extract_frame_webm_at_timestamp(video_path, timestamp_ms, output_image_path):
+    """从视频中提取指定时间点的帧，单位为毫秒"""
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return None
+
+    logger.info(f"正在寻找时间戳: {timestamp_ms}ms")
+
+    # 从头开始读取视频帧
+    frame_buffer = None  # 保存上一帧
+    last_time = 0  # 上一帧的时间戳
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        current_time = cap.get(cv2.CAP_PROP_POS_MSEC)
+
+        # 打印调试信息
+        logger.debug(f"当前帧时间戳: {current_time}ms")
+
+        # 如果当前时间大于目标时间，返回较近的一帧
+        if current_time >= timestamp_ms:
+            # 判断哪一帧更接近目标时间戳
+            if frame_buffer is not None and abs(last_time - timestamp_ms) < abs(current_time - timestamp_ms):
+                logger.debug(f"使用缓存帧，时间戳: {last_time}ms")
+                frame = frame_buffer
+            else:
+                logger.debug(f"使用当前帧，时间戳: {current_time}ms")
+            break
+
+        # 更新缓存
+        frame_buffer = frame.copy()
+        last_time = current_time
+
+    cap.release()
+    output_image_path = output_image_path.parent/str(output_image_path.stem+"_webm.jpeg")
+    logger.debug(output_image_path)
+    cv2.imwrite(str(output_image_path), frame)
+    return frame
+#
+#
+# def get_video_duration_ms(video_path):
+#     """获取视频最后一帧的时间戳（单位：毫秒）"""
+#     cmd = [
+#         "ffprobe",
+#         "-v", "error",
+#         "-select_streams", "v:0",
+#         "-show_entries", "format=duration",
+#         "-of", "json",
+#         str(video_path)
+#     ]
+#     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+#     info = json.loads(result.stdout)
+#     duration_seconds = float(info["format"]["duration"])
+#     return int(duration_seconds * 1000)
+
+
+# ----------------------------------------------------------------------
+# 1) WebM → MP4：强制恒定帧率 (CFR) + 快速起播 + 关键帧间隔短
+# ----------------------------------------------------------------------
+def convert_webm_to_mp4(webm_path: Path | str,
+                        mp4_path: Path | str,
+                        fps: int = 30) -> None:
+    """
+    使用 FFmpeg 把 WebM 转为 MP4：
+    - `fps`：输出恒定帧率；两端统一 seek 结果
+    - `-movflags faststart`：写 moov box 在前，网页秒开
+    - `-g 1 -bf 0`：全 I-帧（可选，进一步加速随机访问）
+    """
     cmd = [
-        'ffmpeg',
-        '-y',  # overwrite output
-        '-i', str(webm_path),
-        '-c:v', 'libx264',
-        '-preset', 'ultrafast',
-        '-pix_fmt', 'yuv420p',
+        "ffmpeg", "-y",
+        "-i", str(webm_path),
+        "-vf", f"fps={fps}",
+        "-c:v", "libx264", "-preset", "veryfast",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "faststart",
+        "-g", "1", "-bf", "0",
         str(mp4_path)
     ]
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    logger.debug(" ".join(cmd))
+    subprocess.run(cmd, stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=True)
 
 
-def extract_frame_at_timestamp(video_path, timestamp_ms, output_image_path):
-    """从视频中提取指定时间点的帧，单位为毫秒"""
+# ----------------------------------------------------------------------
+# 2) 按帧号精准取帧：兼容 MP4 / WebM
+# ----------------------------------------------------------------------
+def _seek_and_read(cap: cv2.VideoCapture,
+                   frame_idx: int) -> tuple[bool, np.ndarray | None]:
+    """
+    先跳到目标前 1 帧以规避旧版 OpenCV“首帧空读” bug，
+    再 grab 一次预热，最后 read 真实帧。
+    """
+    cap.set(cv2.CAP_PROP_POS_FRAMES, max(frame_idx - 1, 0))
+    cap.grab()
+    return cap.read()
+
+
+def extract_frame_at_timestamp(video_path: Path | str,
+                               timestamp_ms: int,
+                               output_image_path: Path) -> np.ndarray | None:
+    """
+    按毫秒时间戳取帧（MP4 / WebM 通用）：
+    1. 读取 FPS 与总帧数
+    2. 计算目标帧号 N = round(t * fps)
+    3. `_seek_and_read` 取帧；若失败 fallback 为逐帧扫描
+    """
     cap = cv2.VideoCapture(str(video_path))
-    cap.set(cv2.CAP_PROP_POS_MSEC, timestamp_ms)
-    success, frame = cap.read()
-    if success:
-        if not output_image_path.exists():
-            os.makedirs(output_image_path.parent, exist_ok=True)
-        cv2.imwrite(str(output_image_path), frame)
+    if not cap.isOpened():
+        logger.error("无法打开视频：%s", video_path)
+        return None
+
+    fps   = cap.get(cv2.CAP_PROP_FPS)
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if fps <= 0 or total <= 0:
+        cap.release()
+        logger.error("读取元数据失败：fps=%s, total=%s", fps, total)
+        return None
+
+    frame_idx = int(round(timestamp_ms / 1000 * fps))
+    frame_idx = max(0, min(frame_idx, total - 1))
+
+    success, frame = _seek_and_read(cap, frame_idx)
+
+    # —— 兜底：如果首跳失败，逐帧拉到最近 —— #
+    if not success or frame is None:
+        logger.warning("按帧 seek 失败，回退逐帧扫描…")
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        buf, last_ts = None, 0
+        while True:
+            ret, fr = cap.read()
+            if not ret:
+                break
+            cur_ts = cap.get(cv2.CAP_PROP_POS_MSEC)
+            if cur_ts >= timestamp_ms:
+                frame = fr if abs(cur_ts - timestamp_ms) < abs(last_ts - timestamp_ms) else buf
+                break
+            buf, last_ts = fr.copy(), cur_ts
+        success = frame is not None
+
     cap.release()
+    if not success:
+        logger.error("解码失败：%s @ %d ms", video_path, timestamp_ms)
+        return None
+
+    output_image_path = Path(output_image_path)
+    output_image_path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(output_image_path), frame)
     return frame
 
 
-def get_video_duration_ms(video_path):
-    """获取视频最后一帧的时间戳（单位：毫秒）"""
+# # 为向后兼容保留旧函数名
+# extract_frame_webm_at_timestamp = extract_frame_at_timestamp
+
+
+# ----------------------------------------------------------------------
+# 3) 获取时长（毫秒）：先 ffprobe，失败再走 OpenCV
+# ----------------------------------------------------------------------
+def get_video_duration_ms(video_path: Path | str) -> int:
     cmd = [
-        "ffprobe",
-        "-v", "error",
+        "ffprobe", "-v", "error",
         "-select_streams", "v:0",
         "-show_entries", "format=duration",
-        "-of", "json",
-        str(video_path)
+        "-of", "json", str(video_path)
     ]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    info = json.loads(result.stdout)
-    duration_seconds = float(info["format"]["duration"])
-    return int(duration_seconds * 1000)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        seconds = float(json.loads(r.stdout)["format"]["duration"])
+        return int(seconds * 1000)
+    except Exception as e:
+        logger.warning("ffprobe 失败 (%s)，改用 OpenCV 估算", e)
 
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        logger.error("无法打开视频：%s", video_path)
+        return 0
+    fps   = cap.get(cv2.CAP_PROP_FPS)
+    total = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    cap.release()
+    return int(total / fps * 1000) if fps > 0 else 0
 
 def merge_scroll_group_in_place(scroll_group):
     """合并scroll操作组，仅保留最后一个scroll，并修改其scrollDistance与scrollDirection"""

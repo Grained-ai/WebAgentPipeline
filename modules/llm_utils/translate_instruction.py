@@ -1,3 +1,5 @@
+import time
+from loguru import logger
 from langchain_core.messages import HumanMessage, SystemMessage
 from modules.llm_utils.llm_factory import LLMFactory
 from modules.media_utils.image_ops import encode_image
@@ -30,14 +32,27 @@ class SimpleTranslationResult(BaseModel):
         description='Reason for the output. Concise in one sentence.'
     )
 
-def translate_step_title(input_title):
+def translate_step_title(input_title, image_path):
+    if not image_path:
+        return simple_translate_step_title(input_title)
+    try:
+        if len(input_title.split(' ')) >= 4:
+            logger.warning(f'Input title {input_title} length exceed threshold. Will do Enrich step title.')
+            return enrich_step_title(input_title, image_path)
+    except Exception as e:
+        logger.error(str(e))
+        pass
+    return simple_translate_step_title(input_title)
+
+def simple_translate_step_title(input_title):
     system_prompt_path = Path(__file__).parent / 'prompts' / 'simple_translate_step_title.prompt'
     with open(system_prompt_path, 'r') as f:
         prompt_template = f.read()
     parser = PydanticOutputParser(pydantic_object=SimpleTranslationResult)
 
     prompt = prompt_template.format(format_instructions=parser.get_format_instructions(),
-                                    step_title=input_title)
+                                    step_title=input_title,
+                                    timestamps=str(time.time()*1000))
     llm_ins = LLMFactory().create_llm_instance()
     res = llm_ins.invoke(prompt)
     answer = parser.parse(res.content)

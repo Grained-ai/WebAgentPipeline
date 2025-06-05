@@ -72,11 +72,14 @@ from modules.step_level_modification import (
     extract_blank_frame,
     label_bbox,
     substitute_step_type,
-    assign_qc_image_used
+    assign_qc_image_used,
+    visualize_delete_step
 )
 from modules.instruction_level_modification import (
     merge_consecutive_scrolls,
-    check_and_add_end_step
+    check_and_add_end_step,
+    delete_first_launch_app,
+    instruction_level_modify_step_type
 )
 
 
@@ -97,7 +100,7 @@ class ConsecutiveScrollsProblem(ProblemBase):
 
 @register_problem("REDUNDANT_LAUNCHAPP")  # 同一类型可对应多个修复策略
 class RedundantLaunchAppProblem(ProblemBase):
-    pipeline = [delete_step]
+    pipeline = [delete_first_launch_app]
 
 
 @register_problem("MISSING_BBOX")
@@ -128,6 +131,16 @@ class WrongStepTypeProblem(ProblemBase):
 @register_problem("MISSING_QC_IMAGE_PATH")
 class MissingQCImagePath(ProblemBase):
     pipeline = [assign_qc_image_used]
+
+
+@register_problem("INSTRUCTION_LEVEL_WRONG_STEP_TYPE")
+class InstructionLevelWrongStepTypes(ProblemBase):
+    pipeline = [instruction_level_modify_step_type]
+
+
+@register_problem("NEED_TO_VISUALIZE_DELETED_STEP")
+class NeedVisualizeDelete(ProblemBase):
+    pipeline = [visualize_delete_step]
 
 
 # --------------------------------------------------

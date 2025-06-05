@@ -1,5 +1,3 @@
-from keyword import kwlist
-
 from modules.qc_problems import (
     ProblemBase,
     ChineseInTitleProblem,
@@ -8,7 +6,8 @@ from modules.qc_problems import (
     MissingBlankScreenshotProblem,
     MissingMarkedScreenshotProblem,
     WrongStepTypeProblem,
-    MissingQCImagePath)
+    MissingQCImagePath,
+    NeedVisualizeDelete)
 from modules.webagent_data_utils import WebAgentStep
 from configs.configs import STORAGE_PATH
 from loguru import logger
@@ -24,7 +23,8 @@ def check_chinese_in_title(step: WebAgentStep) -> Optional[ProblemBase]:
 
 
 def check_if_missing_bbox(step: WebAgentStep) -> Optional[ProblemBase]:
-    if step.type not in ['press_enter', 'back', 'cache', 'paste', 'end', 'launchApp']:
+    if step.type not in ['press_enter', 'back', 'cache', 'paste', 'end', 'launchApp'] and step.title.lower() not in [
+        'end']:
         if step.adjusted_rect is None:
             note = f'{step.type} missing adjusted_rect'
 
@@ -40,6 +40,8 @@ def check_if_answer(step: WebAgentStep) -> Optional[ProblemBase]:
         note = f'{step.type} need to manually add bbox'
 
         if f'Need to add new bbox. Notes: {note}' in step.fix_methods:
+            return None
+        if step.recrop_rect:
             return None
         return MissingBBoxProblem(detail=f'{step.type} need to manually add bbox',
                                   kwargs={"extra_note": note})
@@ -59,6 +61,10 @@ def check_if_vague_type_in(step: WebAgentStep) -> Optional[ProblemBase]:
 
 
 def check_if_missing_frame(step: WebAgentStep) -> Optional[ProblemBase]:
+    if not step.recording_id:
+        logger.warning(f"No RecordingID for {step.id}: {step.type}")
+        step.screenshot = None
+        return None
     if not step.timestamp:
         logger.warning(f"No screenshot for {step.id}: {step.type}")
         step.screenshot = None
@@ -103,4 +109,10 @@ def check_if_update_qc_image_used(step: WebAgentStep) -> Optional[ProblemBase]:
     if not step.qc_image_used:
         return MissingQCImagePath(detail='Refresh QC image used.',
                                   kwargs={'storage_path': STORAGE_PATH})
+    return None
+
+
+def check_if_visualize_delete_steps(step: WebAgentStep) -> Optional[ProblemBase]:
+    if step.deleted and '[REMOVED]' not in step.title:
+        return NeedVisualizeDelete(detail="Visualize delete steps.")
     return None

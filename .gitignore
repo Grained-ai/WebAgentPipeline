@@ -180,3 +180,6 @@ playground
 **/frames*
 src
 **/*.yaml
+**/*.json
+**/*.csv
+**/*.zip
