@@ -202,7 +202,7 @@ class WebAgentFlow:
 
     @property
     def title(self) -> Optional[str]:
-        return self._flow_dict.get("title")
+        return self._flow_dict.get("title").strip()
 
     @title.setter
     def title(self, value: str):

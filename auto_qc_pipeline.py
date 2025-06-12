@@ -1,4 +1,5 @@
 import json
+import shutil
 import traceback
 import yaml
 from loguru import logger
@@ -188,37 +189,28 @@ class AutoQCPipeline:
     def postprocess_modification(self, json_file: Path):
         with open(json_file, 'r') as f:
             data = json.load(f)
+        shutil.copy(json_file, json_file.parent/(json_file.stem+'_bak.json'))
         out = []
         for d in tqdm(data):
             flow_ins = WebAgentFlow(d)
-            skip = False
             for step in flow_ins.steps:
-                # if step.timestamp and step.screenshot:
                 logger.info(f"BBoxing: {step.id}")
                 label_bbox(step, storage_path=STORAGE_PATH, ignore_missing_exception=True)
-                # if step.type.lower() in ['press_enter', 'back', 'cache', 'paste', 'end']:
-                #     step.marked_screenshot = step.screenshot
-                #     step.qc_image_used = "http://3.145.59.104/storage/" + str(step.screenshot)
                 visualize_delete_step(step)
                 if step.type in ['select', 'drag']:
-                    skip = True
+                    step.title = step.title+"[is_remake]"
                 if step.is_remake:
-                    skip = True
+                    step.title = step.title+"[is_remake]"
                 logger.debug(step.qc_image_used)
-            if skip:
-                continue
             out.append(flow_ins.to_dict())
         with open(json_file, 'w') as f:
             json.dump(out, f, ensure_ascii=False, indent=4)
         return out
 
     def postprocess_modification_batch(self, json_files: List[Path]):
-        out = 0
         for json_file in tqdm(json_files):
-            logger.info(f"Re-bboxing: {json_file}")
-            o = self.postprocess_modification(json_file)
-            out+= len(o)
-        logger.info(out)
+            logger.info(f"Applying: {json_file}")
+            self.postprocess_modification(json_file)
 
     def deliver(self, json_file: Path):
         data = self.postprocess_modification(json_file)
@@ -288,6 +280,10 @@ class AutoQCPipeline:
             with open(f"{key}_{date.today().strftime('%Y-%m-%d')}.json", 'w') as f:
                 json.dump(apply_by_website[key], f, ensure_ascii=False, indent=4)
         logger.success(f"All: {sum([len(i) for i in total_outs])}")
+
+    def extract_empty_frame_steps(self, json_files: List[Path]):
+        pass
+
 
 def main():
     parser = argparse.ArgumentParser(description="AutoQC Pipeline: Process JSON files to find issues.")

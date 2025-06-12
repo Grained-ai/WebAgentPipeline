@@ -56,7 +56,7 @@ def group_by_actiontodo_and_instructions(csv_path: Path, instruction_map: dict,
             actiontodo_string = row['ActionTodo'].strip()
             actiontodos = [todo.strip() for todo in actiontodo_string.split(',')]
 
-            instruction = row['instruction'].strip()
+            instruction = row['instruction'].strip().replace('  ', ' ')
             jsonname = row['json_name'].strip()
             batch_id = row['batch id'].strip()
             parent_items = row['Parent items'].strip()
@@ -142,13 +142,13 @@ def group_by_actiontodo_and_instructions(csv_path: Path, instruction_map: dict,
                         if 'modified_title' not in entry:
                             entry['modified_title'] = []
                         entry['modified_title'].extend(instruction_records)
-                    if entry['title'] + '$$' + str(entry['fix_methods']) + "+" + str(entry['batch_id']) in sorted(
-                            [i['title'] + '$$' + str(i['fix_methods']) + "+" + str(i['batch_id']) for i in
-                             aggregated_data]):
-                        # TODO: Fix the bug
-                        logger.error(entry['title'] + '\n' + str(entry['fix_methods']) + "\n" + str(entry['batch_id']))
-                        break
-                    flow_ins = WebAgentFlow(entry)
+                    # if entry['title'] + '$$' + str(entry['fix_methods']) + "+" + str(entry['batch_id']) in sorted(
+                    #         [i['title'] + '$$' + str(i['fix_methods']) + "+" + str(i['batch_id']) for i in
+                    #          aggregated_data]):
+                    #     # TODO: Fix the bug
+                    #     logger.error(entry['title'] + '\n' + str(entry['fix_methods']) + "\n" + str(entry['batch_id']))
+                    #     break
+                    # flow_ins = WebAgentFlow(entry)
                     # for step in flow_ins.steps:
                     #     step.marked_screenshot =
                     aggregated_data.append(entry)
@@ -163,18 +163,19 @@ def main():
     # 配置文件路径
     csv_path = Path(
         "/Users/anthonyf/projects/grainedAI/WebAgentPipeline_storage/src/modification/20250527/QC_WebAgent_任务总表_数据修正汇总表.csv")  # CSV 文件路径
-    json_dir = Path("/Users/anthonyf/projects/grainedAI/WebAgentPipeline_storage/src/json_all")  # JSON 文件夹路径
+    json_dir = Path("/Users/anthonyf/projects/grainedAI/WebAgentPipeline_storage/src/json_all_20250609")  # JSON 文件夹路径
     # actiontodo_name = ["质检平台-拉框"]  # 目标 ActionTodo
     actiontodo_name = None
-    exclude_actiontodo_names = ['未知：需要帮助', '重新标注流程', '']
+    exclude_actiontodo_names = []
     allow_multiple_todo_name = True
     target_batch = None
-    base_exclude_all = Path("/Users/anthonyf/projects/grainedAI/WebAgentPipeline_storage/src/modification/20250603/delivered")
-    exclude_entries_jsons=[Path(i) for i in glob.glob(str(base_exclude_all/'*.json'))]
+    base_exclude_all = Path("/Users/anthonyf/projects/grainedAI/WebAgentPipeline_storage/src/all_delivered/all_delivered_20250609")
+    exclude_entries_jsons=[Path(i) for i in glob.glob(str(base_exclude_all/'*.json')) if 'SUMMARY' not in i]
+    exclude_entries_jsons=[]
     # 是否允许多个 ActionTodo 匹配
 
     # 获取所有 JSON 文件路径
-    json_paths = list(json_dir.glob("*.json"))
+    json_paths = list([i for i in json_dir.glob("*.json") if "SUMMARY" not in i.name])
 
     # 先加载所有 JSON 文件，将其按 instruction 聚合
     instruction_map = load_instructions_and_json(json_paths)
@@ -190,26 +191,26 @@ def main():
     # output_string = '_'.join(target_batch)
     # 输出结果到文件
     print(len(set([i['id'] for i in results])))
-    output_dir = Path("/Users/anthonyf/projects/grainedAI/WebAgentPipeline_storage/src/modification/20250604")
+    output_dir = Path("/Users/anthonyf/projects/grainedAI/WebAgentPipeline_storage/src/modification/20250609/todo_all_todo")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     chunk_size = 30
     total_chunks = math.ceil(len(results) / chunk_size)
 
-    # for idx in range(total_chunks):
-    #     chunk = results[idx * chunk_size:(idx + 1) * chunk_size]
-    #     output_path = output_dir / f"all_fix_{idx + 1}.json"
-    #     with open(output_path, 'w', encoding='utf-8') as f:
-    #         json.dump(chunk, f, ensure_ascii=False, indent=4)
-    #
-    #     log_path = output_dir / f"all_fix_log_{idx + 1}.json"
-    #     with open(log_path, 'w', encoding='utf-8') as f:
-    #         json.dump(
-    #             sorted([i['title'] + '\n' + str(i['fix_methods']) + "\n" + str(i['batch_id']) for i in chunk]),
-    #             f, ensure_ascii=False, indent=4
-    #         )
-    #
-    # print(f"聚合结果已保存为 {total_chunks} 组，每组最多 {chunk_size} 条，共 {len(results)} 条记录")
+    for idx in range(total_chunks):
+        chunk = results[idx * chunk_size:(idx + 1) * chunk_size]
+        output_path = output_dir / f"all_fix_{idx + 1}.json"
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(chunk, f, ensure_ascii=False, indent=4)
+
+        log_path = output_dir / f"all_fix_log_{idx + 1}.json"
+        with open(log_path, 'w', encoding='utf-8') as f:
+            json.dump(
+                sorted([i['title'] + '\n' + str(i['fix_methods']) + "\n" + str(i['batch_id']) for i in chunk]),
+                f, ensure_ascii=False, indent=4
+            )
+
+    print(f"聚合结果已保存为 {total_chunks} 组，每组最多 {chunk_size} 条，共 {len(results)} 条记录")
 
 if __name__ == "__main__":
     main()
