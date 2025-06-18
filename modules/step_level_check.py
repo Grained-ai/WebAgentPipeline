@@ -7,7 +7,8 @@ from modules.qc_problems import (
     MissingMarkedScreenshotProblem,
     WrongStepTypeProblem,
     MissingQCImagePath,
-    NeedVisualizeDelete)
+    NeedVisualizeDelete,
+    WrongScrollRect)
 from modules.webagent_data_utils import WebAgentStep
 from configs.configs import STORAGE_PATH
 from loguru import logger
@@ -115,4 +116,10 @@ def check_if_update_qc_image_used(step: WebAgentStep) -> Optional[ProblemBase]:
 def check_if_visualize_delete_steps(step: WebAgentStep) -> Optional[ProblemBase]:
     if step.deleted and '[REMOVED]' not in step.title:
         return NeedVisualizeDelete(detail="Visualize delete steps.")
+    return None
+
+def check_if_scroll_in_full_screen(step: WebAgentStep) -> Optional[ProblemBase]:
+    if step.to_dict().get('recordingWindowRect') and step.type == 'scroll' and "whole screen" in step.title and not step.rect["top"]:
+        return WrongScrollRect(detail='Modify Scroll Rect in full screen.',
+                               kwargs={'storage_path': STORAGE_PATH})
     return None

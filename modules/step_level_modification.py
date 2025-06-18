@@ -278,3 +278,10 @@ def visualize_delete_step(step: WebAgentStep, **kwargs) -> WebAgentStep:
         step.deleted = False
         step.qc_image_used = False
     return step
+
+def modify_wrong_scroll_rect(step: WebAgentStep, **kwargs) -> WebAgentStep:
+    step.rect["top"] = 0
+
+    label_bbox(step, **kwargs)
+
+    return step

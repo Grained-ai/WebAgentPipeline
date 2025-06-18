@@ -73,7 +73,8 @@ from modules.step_level_modification import (
     label_bbox,
     substitute_step_type,
     assign_qc_image_used,
-    visualize_delete_step
+    visualize_delete_step,
+    modify_wrong_scroll_rect
 )
 from modules.instruction_level_modification import (
     merge_consecutive_scrolls,
@@ -141,6 +142,10 @@ class InstructionLevelWrongStepTypes(ProblemBase):
 @register_problem("NEED_TO_VISUALIZE_DELETED_STEP")
 class NeedVisualizeDelete(ProblemBase):
     pipeline = [visualize_delete_step]
+
+@register_problem("WRONG_SCROLL_RECT")
+class WrongScrollRect(ProblemBase):
+    pipeline = [modify_wrong_scroll_rect]
 
 
 # --------------------------------------------------
