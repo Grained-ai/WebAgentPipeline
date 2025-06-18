@@ -7,8 +7,9 @@ from pathlib import Path
 from modules.media_utils.video_ops import (convert_webm_to_mp4,
                                            extract_frame_at_timestamp,
                                            extract_frame_webm_at_timestamp)
-from modules.media_utils.image_ops import mark_redo_bbox
-from modules.media_utils.image_ops import mark_click_position
+from modules.media_utils.image_ops import (mark_redo_bbox,
+                                           mark_click_position,
+                                           crop_browser_from_desktop)
 from modules.llm_utils.translate_instruction import translate_step_title
 from PIL import Image
 import numpy as np
@@ -41,6 +42,10 @@ def extract_blank_frame(step: WebAgentStep, **kwargs) -> WebAgentStep:
     frame = extract_frame_at_timestamp(mp4_path, calibrated_timestamp+50, raw_output)
     if frame is None or not frame.any():
         raise StepException(f"Step {step_id} failed to extract frame from {calibrated_timestamp}")
+
+    if step.to_dict().get("recordingWindowRect"):
+        # 完整桌面中截取出浏览器
+        frame = crop_browser_from_desktop(frame, step.to_dict()["recordingWindowRect"], step.browser_top_height, step.viewport)["full_browser"]
 
     target_w = int(step.viewport['width'] * step.device_pixel_ratio)
     orig_h, orig_w = frame.shape[:2]
