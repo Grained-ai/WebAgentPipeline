@@ -199,6 +199,9 @@ class AutoQCPipeline:
                 visualize_delete_step(step)
                 if step.type in ['select', 'drag']:
                     step.title = step.title+"[is_remake]"
+                if step.recrop_rect:
+                    step.is_remake = False
+                    step.title = step.title.replace("[is_remake]", "")
                 if step.is_remake:
                     step.title = step.title+"[is_remake]"
                 logger.debug(step.qc_image_used)
@@ -224,8 +227,8 @@ class AutoQCPipeline:
                 label_bbox(step, storage_path=STORAGE_PATH, ignore_missing_exception=True)
                 step.recrop_rect = None
                 visualize_delete_step(step)
-                if step.type in ['select', 'drag']:
-                    skip = True
+                # if step.type in ['select', 'drag']:
+                #     skip = True
                 if step.is_remake:
                     skip = True
 
