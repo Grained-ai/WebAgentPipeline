@@ -97,8 +97,8 @@ def crop_browser_from_desktop(desktop_image, recording_window_rect, browser_top_
     # 提取浏览器窗口位置信息
     browser_left = recording_window_rect['left']
     browser_top = recording_window_rect['top']
-    browser_width = min(recording_window_rect['width'], viewport['width'])
-    browser_height = min(recording_window_rect['height'], viewport['height'])
+    browser_width = viewport['width']
+    browser_height = viewport['height'] + browser_top_height
 
     logger.info(f"浏览器窗口位置: ({browser_left}, {browser_top})")
     logger.info(f"浏览器窗口尺寸: {browser_width}x{browser_height}")
