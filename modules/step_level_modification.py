@@ -182,6 +182,10 @@ def label_bbox(step: WebAgentStep, **kwargs) -> WebAgentStep:
     output_path = storage_path / 'frames_marked' / f"{step.id}_marked{'2' if is_neg else ''}.jpeg"
     os.makedirs(output_path.parent, exist_ok=True)
 
+    if step.type == 'scroll' and "whole screen" in step.title:
+        logger.warning("Scroll full screen. Will adjust rect automatically")
+        step.rect["top"] = 0
+
     if step.type.lower() not in ['press_enter', 'back', 'cache', 'paste', 'end', 'launchapp']:
         if step.recrop_rect:
             image = Image.open(str(img_path))
@@ -277,6 +281,8 @@ def visualize_delete_step(step: WebAgentStep, **kwargs) -> WebAgentStep:
         step.title = ''
         step.deleted = False
         step.qc_image_used = False
+    if '[NOT_REMOVED]' in step.title:
+        step.deleted = False
     return step
 
 def modify_wrong_scroll_rect(step: WebAgentStep, **kwargs) -> WebAgentStep:

@@ -189,7 +189,7 @@ class AutoQCPipeline:
     def postprocess_modification(self, json_file: Path):
         with open(json_file, 'r') as f:
             data = json.load(f)
-        shutil.copy(json_file, json_file.parent/(json_file.stem+'_bak.json'))
+        shutil.copy(json_file, json_file.parent / (json_file.stem + '_bak.json'))
         out = []
         for d in tqdm(data):
             flow_ins = WebAgentFlow(d)
@@ -197,13 +197,23 @@ class AutoQCPipeline:
                 logger.info(f"BBoxing: {step.id}")
                 label_bbox(step, storage_path=STORAGE_PATH, ignore_missing_exception=True)
                 visualize_delete_step(step)
-                if step.type in ['select', 'drag']:
-                    step.title = step.title+"[is_remake]"
+                native_drop_type_list = ['select', 'drag']
+                if step.type in native_drop_type_list and any([i in step.title.lower() for i in native_drop_type_list]):
+                    logger.debug(f"STEP.TYPE == {step.type}")
+                    step.title = step.title + "[is_remake]"
+                if '[not_is_remake]' in step.title and step.is_remake:
+                    logger.debug("Revert is_remake flag")
+                    step.is_remake = False
+                    step.title = step.title.replace("[not_is_remake]", "")
+                    step.title = step.title.replace('[is_remake]', '')
+
+                if step.is_remake:
+                    logger.debug("IS_REMAKE == TRUE")
+                    step.title = step.title + "[is_remake]"
                 if step.recrop_rect:
                     step.is_remake = False
                     step.title = step.title.replace("[is_remake]", "")
-                if step.is_remake:
-                    step.title = step.title+"[is_remake]"
+                    logger.debug(f'Current step title: {step.title}')
                 logger.debug(step.qc_image_used)
             out.append(flow_ins.to_dict())
         with open(json_file, 'w') as f:
@@ -222,16 +232,19 @@ class AutoQCPipeline:
         for d in tqdm(data):
             flow_ins = WebAgentFlow(d)
             skip = False
+            if '[REDO]' in flow_ins.title:
+                logger.error(f"{flow_ins.title} is Discarded.")
+                skip = True
             for step in flow_ins.steps:
                 logger.info(f"BBoxing: {step.id}")
-                label_bbox(step, storage_path=STORAGE_PATH, ignore_missing_exception=True)
-                step.recrop_rect = None
                 visualize_delete_step(step)
+                if not step.deleted:
+                    label_bbox(step, storage_path=STORAGE_PATH, ignore_missing_exception=True)
+                step.recrop_rect = None
                 # if step.type in ['select', 'drag']:
                 #     skip = True
                 if step.is_remake:
                     skip = True
-
                 logger.debug(step.qc_image_used)
 
             if not any([i.screenshot for i in flow_ins.steps]):
@@ -242,7 +255,7 @@ class AutoQCPipeline:
                 continue
 
             out.append(flow_ins.to_dict())
-        with open(json_file.parent/str("deliver_version_"+json_file.name), 'w') as f:
+        with open(json_file.parent / str("deliver_version_" + json_file.name), 'w') as f:
             json.dump(out, f, ensure_ascii=False, indent=4)
         delivered_count = len(out)
         logger.success(f"post_processed count: {postprocess_count}")
@@ -312,11 +325,14 @@ def main():
         json_path = Path(args.json_path[0])
         pipeline = AutoQCPipeline()
         if args.deliver:
+            logger.warning(f"Starts to deliver {args.json_path}")
             pipeline.deliver(json_path)
         elif args.redo_bbox:
+            logger.warning(f"Starts to redo_bbox {args.json_path}")
             pipeline.postprocess_modification(json_path)
 
         else:
+            logger.warning(f"Starts to pre_process {args.json_path}")
             issues = pipeline.preprocess(json_path)
             logger.success(f"✔ 共发现 {len(issues)} 个问题")
     else:

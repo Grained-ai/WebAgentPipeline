@@ -119,7 +119,7 @@ def check_if_visualize_delete_steps(step: WebAgentStep) -> Optional[ProblemBase]
     return None
 
 def check_if_scroll_in_full_screen(step: WebAgentStep) -> Optional[ProblemBase]:
-    if step.to_dict().get('recordingWindowRect') and step.type == 'scroll' and "whole screen" in step.title and not step.rect["top"]:
+    if step.type == 'scroll' and "whole screen" in step.title and not step.rect["top"]:
         return WrongScrollRect(detail='Modify Scroll Rect in full screen.',
                                kwargs={'storage_path': STORAGE_PATH})
     return None
