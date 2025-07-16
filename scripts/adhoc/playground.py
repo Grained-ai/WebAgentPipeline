@@ -20,53 +20,59 @@ from PIL import Image
 
 from scripts.merge_json_results import flow_ins
 
-image_path = "/Users/anthonyf/projects/grainedAI/WebAgentPipeline_storage/src/modification/20250601/fn3pxAh8Y4F0ttLPNyNCD_marked.jpeg"
+image_path = "/Users/anthonyf/projects/grainedAI/WebAgentPipeline_storage/src/modification/20250612/4mGniXqmWSN5QyZextCzK_marked.jpeg"
 annotations = [
     {
         "type": "rect",
-        "x": 463,
-        "y": 462.21875,
-        "width": 379,
-        "height": 52,
-        "xRatio": 0.22421307506053267,
-        "yRatio": 0.30409128289473686,
-        "widthRatio": 0.18353510895883776,
-        "heightRatio": 0.034210526315789476
+        "x": 825,
+        "y": 330.09375,
+        "width": 618,
+        "height": 88,
+        "xRatio": 0.39663461538461536,
+        "yRatio": 0.21560662965382102,
+        "widthRatio": 0.2971153846153846,
+        "heightRatio": 0.05747877204441541
     }
 ]
 import cv2
+
 # 加载图像
 # image = Image.open(image_path)
-rect_info ={'left': 595, 'top': 679, 'right': 1063, 'bottom': 712}
+rect_info = {'left': 595, 'top': 679, 'right': 1063, 'bottom': 712}
 
 # im = mark_redo_bbox(image, annotations)
 
-image_path = "/Users/anthonyf/projects/grainedAI/WebAgentPipeline_storage/src/modification/20250601/5oOg-zg_mYV31XJqOTCPi_marked.jpeg"
+image_path = "/Users/anthonyf/projects/grainedAI/WebAgentPipeline_storage/src/modification/20250624/H5G8jOOaqwx3oI4VeyV6P_marked.jpeg"
 
-json_path = '/Users/anthonyf/projects/grainedAI/WebAgentPipeline_storage/src/modification/20250604/all_fix_2.json'
+json_path = '/Users/anthonyf/projects/grainedAI/WebAgentPipeline_storage/src/modification/20250624/preprocessed_好运来_rmhWndA-T0jc5dfXWgbfS_20250617_153435.json'
 from modules.webagent_data_utils import WebAgentFlow
 from modules.instruction_level_modification import merge_consecutive_scrolls
 from modules.instruction_level_check import check_consecutive_scrolls, check_if_wrong_step_type
+from modules.step_level_modification import mark_redo_bbox
 import json
+
 with open(json_path, 'r', encoding='utf-8') as f:
     data = json.load(f)
 flow_inss = [WebAgentFlow(i) for i in data]
+
 for flow_ins in flow_inss:
     # if flow_ins.id == 'MVJEVXrFN3tRe93mSdhbd':
-        # res = check_if_wrong_step_type(flow_ins)
-        # res.fix(flow_ins)
-        # res = check_consecutive_scrolls(flow_ins)
-        # a = [i.title for i in flow_ins.steps]
-        # print(a)
-        # ins = res.fix(flow_ins)
-        # print([i.title for i in ins.steps])
+    # res = check_if_wrong_step_type(flow_ins)
+    # res.fix(flow_ins)
+    # res = check_consecutive_scrolls(flow_ins)
+    # a = [i.title for i in flow_ins.steps]
+    # print(a)
+    # ins = res.fix(flow_ins)
+    # print([i.title for i in ins.steps])
     for step in flow_ins.steps:
-        if step.id == '5oOg-zg_mYV31XJqOTCPi':
+        if step.id == 'H5G8jOOaqwx3oI4VeyV6P':
             print("HERE")
-            image = cv2.imread(str(image_path))
+            # image = cv2.imread(str(image_path))
+            image = Image.open(str(image_path))
 
-            adujested_rect = step.adjusted_rect
-            im = mark_click_position(image, x=0, y=0, rect=adujested_rect)
-            cv2.imshow('dd', im)
-            cv2.waitKey()
-
+            img = mark_redo_bbox(image, step.recrop_rect)
+            img.show()
+            # adujested_rect = step.adjusted_rect
+            # im = mark_click_position(image, x=0, y=0, rect=adujested_rect)
+            # cv2.imshow('dd', im)
+            # cv2.waitKey()

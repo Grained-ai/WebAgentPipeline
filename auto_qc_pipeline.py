@@ -195,7 +195,11 @@ class AutoQCPipeline:
             flow_ins = WebAgentFlow(d)
             for step in flow_ins.steps:
                 logger.info(f"BBoxing: {step.id}")
-                label_bbox(step, storage_path=STORAGE_PATH, ignore_missing_exception=True)
+                try:
+                    label_bbox(step, storage_path=STORAGE_PATH, ignore_missing_exception=True)
+                except:
+                    logger.error("Failed to label")
+                    continue
                 visualize_delete_step(step)
                 native_drop_type_list = ['select', 'drag']
                 if step.type in native_drop_type_list and any([i in step.title.lower() for i in native_drop_type_list]):
@@ -229,37 +233,53 @@ class AutoQCPipeline:
         data = self.postprocess_modification(json_file)
         postprocess_count = len(data)
         out = []
+        skipped_out = []
         for d in tqdm(data):
             flow_ins = WebAgentFlow(d)
             skip = False
+            reason = None
             if '[REDO]' in flow_ins.title:
                 logger.error(f"{flow_ins.title} is Discarded.")
                 skip = True
+                reason = 'REDO in title'
             for step in flow_ins.steps:
                 logger.info(f"BBoxing: {step.id}")
                 visualize_delete_step(step)
                 if not step.deleted:
-                    label_bbox(step, storage_path=STORAGE_PATH, ignore_missing_exception=True)
+                    try:
+                        label_bbox(step, storage_path=STORAGE_PATH, ignore_missing_exception=True)
+                    except:
+                        logger.error("Failed to label")
+                        continue
+                step._step_dict['recrop_rect'] = step.recrop_rect
                 step.recrop_rect = None
+
                 # if step.type in ['select', 'drag']:
                 #     skip = True
-                if step.is_remake:
-                    skip = True
-                logger.debug(step.qc_image_used)
-
-            if not any([i.screenshot for i in flow_ins.steps]):
-                logger.error(f"No screenshot flow {flow_ins.id}")
-                skip = True
+            #     if not step.deleted and step.is_remake and '[REMOVED]' not in step.title and 'end' not in step.title.lower():
+            #         reason = f'{step.title}:{step.deleted}, {step.is_remake}'
+            #         skip = True
+            #     logger.debug(step.qc_image_used)
+            #
+            # if not any([i.screenshot for i in flow_ins.steps]):
+            #     logger.error(f"No screenshot flow {flow_ins.id}")
+            #     skip = True
+            #     reason = "NO screenshot"
 
             if skip:
+                logger.error(f"{flow_ins.id} is discarded. {reason}")
+                skipped_out.append(flow_ins.to_dict())
                 continue
 
             out.append(flow_ins.to_dict())
         with open(json_file.parent / str("deliver_version_" + json_file.name), 'w') as f:
             json.dump(out, f, ensure_ascii=False, indent=4)
+        with open(json_file.parent / str("skipped_" + json_file.name), 'w') as f:
+            json.dump(skipped_out, f, ensure_ascii=False, indent=4)
         delivered_count = len(out)
         logger.success(f"post_processed count: {postprocess_count}")
         logger.success(f"Delivered count: {delivered_count}")
+
         return out
 
     def deliver_batch(self, json_files: List[Path]):
