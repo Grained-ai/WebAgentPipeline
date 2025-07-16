@@ -183,3 +183,9 @@ src
 **/*.json
 **/*.csv
 **/*.zip
+*.webm
+*.mp4
+*.jpeg
+*.xlsx
+*.csv
+scripts/archive/*
