@@ -6,7 +6,8 @@ import os
 from pathlib import Path
 from modules.media_utils.video_ops import (convert_webm_to_mp4,
                                            extract_frame_at_timestamp,
-                                           extract_frame_webm_at_timestamp)
+                                           extract_frame_webm_at_timestamp,
+                                           extract_frame_at_timestamp_pyav)
 from modules.media_utils.image_ops import (mark_redo_bbox,
                                            mark_click_position,
                                            crop_browser_from_desktop)
@@ -14,8 +15,7 @@ from modules.llm_utils.translate_instruction import translate_step_title
 from PIL import Image
 import numpy as np
 import cv2
-
-from modules.webagent_data_utils import WebAgentStep
+from modules.webagent_data_utils import WebAgentStep, WebAgentFlow
 
 
 def extract_blank_frame(step: WebAgentStep, **kwargs) -> WebAgentStep:
@@ -24,28 +24,31 @@ def extract_blank_frame(step: WebAgentStep, **kwargs) -> WebAgentStep:
     is_negative_timestamp = step.timestamp < 0
 
     storage_path = Path(kwargs['storage_path'])
+    video_dir = storage_path if not Path(kwargs['video_dir']) else Path(kwargs['video_dir'])
     scaled_output = storage_path / 'frames_raw' / f"{step_id}_scaled{'2' if is_negative_timestamp else ''}.jpeg"
     if scaled_output.exists():
         step.screenshot = str(scaled_output.relative_to(storage_path))
         logger.success(f"Found {scaled_output}. Updated.")
         return step
     logger.warning(f"{scaled_output} not exist. Need to extract from video.")
-    video_path = storage_path / f"{step.recording_id}.webm"
-    mp4_path = storage_path / f"{step.recording_id}.mp4"
+    # video_path = video_dir / f"{step.recording_id}.webm"
+    video_path = list(video_dir.rglob(f"{step.recording_id}.webm"))[0]
     if not video_path.exists():
-        raise StepModification(f"Step {step_id} missing video file: {step.recording_id} under {storage_path}")
+        raise StepModification(f"Step {step_id} missing video file: {step.recording_id} under {video_dir}")
+    mp4_path = video_path.parent / f"{step.recording_id}.mp4"
     if not mp4_path.exists():
         logger.warning(f"Will convert: {video_path}->{mp4_path}")
         convert_webm_to_mp4(video_path, mp4_path)
 
     raw_output = storage_path / 'frames_raw' / f"{step_id}_raw.jpeg"
-    frame = extract_frame_at_timestamp(mp4_path, calibrated_timestamp+50, raw_output)
+    frame = extract_frame_at_timestamp(mp4_path, calibrated_timestamp, raw_output)
     if frame is None or not frame.any():
         raise StepException(f"Step {step_id} failed to extract frame from {calibrated_timestamp}")
 
-    if step.to_dict().get("recordingWindowRect"):
-        # 完整桌面中截取出浏览器
+    if step.to_dict().get("recordingWindowRect"):  # TODO: 考虑 ratio 不为 1 的情况
+        # 完整桌面中需要截取出浏览器
         frame = crop_browser_from_desktop(frame, step.to_dict()["recordingWindowRect"], step.browser_top_height, step.viewport)["full_browser"]
+
 
     target_w = int(step.viewport['width'] * step.device_pixel_ratio)
     orig_h, orig_w = frame.shape[:2]
@@ -66,21 +69,114 @@ def extract_blank_frame_webm(step: WebAgentStep, **kwargs) -> WebAgentStep:
     is_negative_timestamp = step.timestamp < 0
 
     storage_path = Path(kwargs['storage_path'])
+    video_dir = storage_path if not Path(kwargs['video_dir']) else Path(kwargs['video_dir'])
     scaled_output = storage_path / 'frames_raw' / f"{step_id}_scaled{'2' if is_negative_timestamp else ''}.jpeg"
     if scaled_output.exists():
         step.screenshot = str(scaled_output.relative_to(storage_path))
         logger.success(f"Found {scaled_output}. Updated.")
         return step
     logger.warning(f"{scaled_output} not exist. Need to extract from video.")
-    video_path = storage_path / f"{step.recording_id}.webm"
-
+    # video_path = storage_path / f"{step.recording_id}.webm"
+    # video_path = video_dir / f"{step.recording_id}.webm"
+    video_path = list(video_dir.rglob(f"{step.recording_id}.webm"))[0]
     if not video_path.exists():
-        raise StepModification(f"Step {step_id} missing video file: {step.recording_id} under {storage_path}")
+        raise StepModification(f"Step {step_id} missing video file: {step.recording_id} under {video_dir}")
 
     raw_output = storage_path / 'frames_raw' / f"{step_id}_raw.jpeg"
-    frame = extract_frame_webm_at_timestamp(video_path, calibrated_timestamp+50, raw_output)
+    frame = extract_frame_at_timestamp_pyav(video_path, calibrated_timestamp-50, raw_output)
     if frame is None or not frame.any():
         raise StepException(f"Step {step_id} failed to extract frame from {calibrated_timestamp}")
+
+    if step.to_dict().get("recordingWindowRect"):
+        # 完整桌面中截取出浏览器
+        frame = crop_browser_from_desktop(frame, step.to_dict()["recordingWindowRect"], step.browser_top_height, step.viewport)["full_browser"]
+
+    target_w = int(step.viewport['width'] * step.device_pixel_ratio)
+    orig_h, orig_w = frame.shape[:2]
+    scale_ratio = target_w / orig_w
+    target_h = int(orig_h * scale_ratio)
+
+    resized = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).resize((target_w, target_h),
+                                                                             Image.Resampling.LANCZOS)
+    frame = cv2.cvtColor(np.array(resized), cv2.COLOR_RGB2BGR)
+
+    cv2.imwrite(scaled_output, frame.copy())
+    step.screenshot = str(scaled_output.relative_to(storage_path))
+    return step
+
+def replace_blank_frame(flow: WebAgentFlow, target_step_index: int, source_step_index: int, **kwargs) -> WebAgentStep:
+    target_step = flow.steps[target_step_index]
+    source_step = flow.steps[source_step_index]
+
+    step_id = target_step.id
+    calibrated_timestamp = source_step.calibrated_timestamp_ms
+    is_negative_timestamp = source_step.timestamp < 0
+
+    storage_path = Path(kwargs['storage_path'])
+    video_dir = storage_path if not Path(kwargs['video_dir']) else Path(kwargs['video_dir'])
+    scaled_output = storage_path / 'frames_raw' / f"{step_id}_scaled{'2' if is_negative_timestamp else ''}.jpeg"
+    if scaled_output.exists():
+        target_step.screenshot = str(scaled_output.relative_to(storage_path))
+        logger.success(f"Found {scaled_output}. Updated.")
+        return target_step
+    logger.warning(f"{scaled_output} not exist. Need to extract from video.")
+    video_path = video_dir / f"{source_step.recording_id}.webm"
+    mp4_path = video_dir / f"{source_step.recording_id}.mp4"
+    if not video_path.exists():
+        raise StepModification(f"Step {step_id} missing video file: {source_step.recording_id} under {video_dir}")
+    if not mp4_path.exists():
+        logger.warning(f"Will convert: {video_path}->{mp4_path}")
+        convert_webm_to_mp4(video_path, mp4_path)
+
+    raw_output = storage_path / 'frames_raw' / f"{step_id}_raw.jpeg"
+    frame = extract_frame_at_timestamp(mp4_path, calibrated_timestamp, raw_output)
+    if frame is None or not frame.any():
+        raise StepException(f"Step {step_id} failed to extract frame from {calibrated_timestamp}")
+
+    if source_step.to_dict().get("recordingWindowRect"):
+        # 完整桌面中截取出浏览器
+        frame = crop_browser_from_desktop(frame, source_step.to_dict()["recordingWindowRect"], source_step.browser_top_height, source_step.viewport)["full_browser"]
+
+    target_w = int(source_step.viewport['width'] * source_step.device_pixel_ratio)
+    orig_h, orig_w = frame.shape[:2]
+    scale_ratio = target_w / orig_w
+    target_h = int(orig_h * scale_ratio)
+
+    resized = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).resize((target_w, target_h),
+                                                                             Image.Resampling.LANCZOS)
+    frame = cv2.cvtColor(np.array(resized), cv2.COLOR_RGB2BGR)
+
+    cv2.imwrite(scaled_output, frame.copy())
+    target_step.screenshot = str(scaled_output.relative_to(storage_path))
+    return target_step
+
+def extract_blank_frame_webm(step: WebAgentStep, **kwargs) -> WebAgentStep:
+    step_id = step.id
+    calibrated_timestamp = step.calibrated_timestamp_ms
+    is_negative_timestamp = step.timestamp < 0
+
+    storage_path = Path(kwargs['storage_path'])
+    video_dir = storage_path if not Path(kwargs['video_dir']) else Path(kwargs['video_dir'])
+    scaled_output = storage_path / 'frames_raw' / f"{step_id}_scaled{'2' if is_negative_timestamp else ''}.jpeg"
+    if scaled_output.exists():
+        step.screenshot = str(scaled_output.relative_to(storage_path))
+        logger.success(f"Found {scaled_output}. Updated.")
+        return step
+    logger.warning(f"{scaled_output} not exist. Need to extract from video.")
+    # video_path = storage_path / f"{step.recording_id}.webm"
+    video_path = video_dir / f"{step.recording_id}.webm"
+
+    if not video_path.exists():
+        raise StepModification(f"Step {step_id} missing video file: {step.recording_id} under {video_dir}")
+
+    raw_output = storage_path / 'frames_raw' / f"{step_id}_raw.jpeg"
+    frame = extract_frame_at_timestamp_pyav(video_path, calibrated_timestamp, raw_output)
+    if frame is None or not frame.any():
+        raise StepException(f"Step {step_id} failed to extract frame from {calibrated_timestamp}")
+
+    if step.to_dict().get("recordingWindowRect"):
+        # 完整桌面中截取出浏览器
+        frame = crop_browser_from_desktop(frame, step.to_dict()["recordingWindowRect"], step.browser_top_height, step.viewport)["full_browser"]
 
     target_w = int(step.viewport['width'] * step.device_pixel_ratio)
     orig_h, orig_w = frame.shape[:2]
