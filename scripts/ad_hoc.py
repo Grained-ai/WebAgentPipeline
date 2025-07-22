@@ -24,7 +24,8 @@ from modules.flow_utils.flow_ops import (json_to_flows,
                                          DELIVERED_JSON_FILES,
                                          BATCH_SIZE,
                                          TIMESTAMP,
-                                         extract_screenshots_and_upload)
+                                         extract_screenshots_and_upload,
+                                         extract_browser_screenshots)
 from modules.feishu_utils.bitable_ops import insert_record, get_records, get_record_ids, delete_records, update_records
 from modules.linux_utils.linux_utils import upload_images_to_server
 from modules.step_level_modification import extract_blank_frame, extract_blank_frame_webm
@@ -994,7 +995,7 @@ def main():
 
             flows = json_to_flows([json_file])
             # extract_browser_screenshots(flows, json_file.parent)
-            extract_screenshots_and_upload(flows, video_dir)
+            extract_browser_screenshots(flows, video_dir)
 
             json_flow = []
             for flow in flows:
