@@ -190,7 +190,7 @@ class WebAgentFlow:
         if 'steps' in flow_dict and isinstance(flow_dict['steps'], str):
             try:
                 flow_dict['steps'] = json.loads(flow_dict['steps'])
-                logger.warning("Modified json steps from string to list")
+                # logger.warning("Modified json steps from string to list")
             except json.JSONDecodeError as e:
                 raise StepLoading(f"解析 steps 字段出错：{e}")
         self._flow_dict = flow_dict

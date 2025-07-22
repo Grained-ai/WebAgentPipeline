@@ -5,7 +5,7 @@ import glob
 import json
 from loguru import logger
 
-jsno_base = Path('/Users/anthonyf/projects/grainedAI/WebAgentPipeline_storage/src/all_delivered/all_delivered_20250610/')
+jsno_base = Path('/Users/anthonyf/projects/grainedAI/WebAgentPipeline_storage/src/all_delivered/all_delivered_20250612')
 jsons = [i for i in glob.glob(str(jsno_base/'*.json')) if "SUMMARY" not in i]
 
 all_instruction_by_id = {}
@@ -46,7 +46,7 @@ with open(jsno_base/'A_SUMMARY_BY_TITLE.json', 'w') as f:
 
 print(len(all_instruction_by_id.keys()))
 print(len(all_instructions_by_title.keys()))
-
+exit(0)
 ## SUMMARIZE ALL WE HAVE
 all_existing = Path("/Users/anthonyf/projects/grainedAI/WebAgentPipeline_storage/src/json_all_20250609")
 jsons = [i for i in glob.glob(str(all_existing/'*.json')) if "SUMMARY" not in i]
