@@ -282,7 +282,7 @@ def label_bbox(step: WebAgentStep, **kwargs) -> WebAgentStep:
         logger.warning("Scroll full screen. Will adjust rect automatically")
         step.rect["top"] = 0
 
-    if step.type.lower() not in ['press_enter', 'back', 'cache', 'paste', 'end', 'launchapp']:
+    if step.type.lower() not in ['launchapp'] or 'end' in step.title.lower():
         if step.recrop_rect:
             image = Image.open(str(img_path))
             mark_redo_bbox(image, step.recrop_rect)
