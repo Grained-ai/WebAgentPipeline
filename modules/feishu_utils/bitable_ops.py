@@ -189,7 +189,7 @@ def get_records_by_id(app_token: str, table_id: str, record_ids):
 
     try:
         # return response.json()['data']['records'][0]['fields']
-        return response.json()['data']['records'][0]
+        return [BitableRecord(record_item) for record_item in response.json()['data']['records']]
     except KeyError:
         return response.json()
     except requests.exceptions.JSONDecodeError:

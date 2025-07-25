@@ -5,6 +5,7 @@ import os
 
 from paramiko import SSHClient
 
+
 SSH_CONFIG = {
     'hostname': 'ec2-3-145-59-104.us-east-2.compute.amazonaws.com',
     'username': 'ubuntu',
@@ -37,7 +38,6 @@ def init_ssh_client():
     except Exception as e:
         logger.error(f"Failed to establish SSH connection: {e}")
         return None
-
 
 def upload_json_to_server(local_json_files: list[Path]):
     """
@@ -87,13 +87,13 @@ def upload_json_to_server(local_json_files: list[Path]):
     except Exception as e:
         logger.error(f"Upload error: {e}")
 
-
-def upload_images_to_server(image_paths) -> list[str]:
+def upload_images_to_server(image_paths: list[Path], candidates: bool = False) -> list[str]:
     """
     上传图片到服务器并返回文件名列表
 
     Args:
         image_paths: 本地图片路径列表
+        candidates: 是否上传候选图片（决定图片上传到哪）
 
     Returns:
         list[str]: 上传成功的文件名列表
@@ -113,8 +113,7 @@ def upload_images_to_server(image_paths) -> list[str]:
         sftp = ssh_client.open_sftp()
 
         # 确保远程目录存在
-        # remote_dir = '/var/www/html/pickimgjson/hl/'
-        remote_dir = '/var/www/html/storage/frames_raw/'
+        remote_dir = '/var/www/html/pickimgjson/hl/' if candidates else '/var/www/html/storage/frames_raw/'
         try:
             sftp.stat(remote_dir)
         except FileNotFoundError:
@@ -146,7 +145,6 @@ def upload_images_to_server(image_paths) -> list[str]:
 
     return uploaded_names
 
-
 def check_ssh_connection() -> bool:
     """检查SSH连接和配置"""
     key_file = Path(SSH_CONFIG['key_filename'])
@@ -164,7 +162,6 @@ def check_ssh_connection() -> bool:
         logger.warning(f"Could not check file permissions: {e}")
 
     return True
-
 
 def list_remote_files(ssh_client, remote_path: str) -> list[str]:
     """
@@ -200,7 +197,6 @@ def list_remote_files(ssh_client, remote_path: str) -> list[str]:
         logger.error(f"💥 Error listing files in {remote_path}: {e}")
         return []
 
-
 def backup_existing_images(ssh_client, remote_dir, search_string):
     """查找包含字符串的文件并添加备份后缀"""
     from datetime import datetime
@@ -221,15 +217,60 @@ def backup_existing_images(ssh_client, remote_dir, search_string):
 
     files = [line.strip() for line in stdout.readlines()]
 
+    backed_up_count = 0
+
     # 给每个文件添加备份后缀
     for file_path in files:
         new_path = f"{file_path}_bak_{today}"
-        rename_cmd = f'mv "{file_path}" "{new_path}"'
-        ssh_client.exec_command(rename_cmd)
-        logger.info(f"备份: {file_path} -> {new_path}")
 
-    ssh_client.close()
-    logger.success(f"完成，共备份 {len(files)} 个文件")
+        # 使用 && 操作符，只有当目标文件不存在时才执行 mv
+        rename_cmd = f'[ ! -f "{new_path}" ] && mv "{file_path}" "{new_path}" && echo "backed_up" || echo "skipped"'
+        stdin, stdout, stderr = ssh_client.exec_command(rename_cmd)
+
+        result = stdout.read().decode().strip()
+        if result == "backed_up":
+            logger.info(f"✅ 备份: {file_path} -> {new_path}")
+            backed_up_count += 1
+        else:
+            logger.info(f"⏭️ 跳过: {file_path} (备份已存在)")
+
+    # ssh_client.close()
+    logger.success(f"完成！共处理 {len(files)} 个文件，成功备份 {backed_up_count} 个")
+
+def replace_image_file(ssh_client, source_path, target_path):
+    """将远程服务器上的图片从源路径复制到目标路径，目标文件若存在将被覆盖"""
+
+    # 连接 SSH
+    if not ssh_client:
+        logger.warning("⚠️ SSH client is None, creating new connection...")
+        ssh_client = init_ssh_client()
+        if ssh_client is None:
+            logger.error("❌ Failed to create SSH connection")
+            return
+
+    # 检查源文件是否存在
+    check_cmd = f'[ -f "{source_path}" ] && echo "exists" || echo "missing"'
+    stdin, stdout, stderr = ssh_client.exec_command(check_cmd)
+    exists = stdout.read().decode().strip()
+
+    if exists != "exists":
+        logger.error(f"❌ 源文件不存在: {source_path}")
+        ssh_client.close()
+        return
+
+    # 无条件覆盖复制
+    copy_cmd = f'cp -f "{source_path}" "{target_path}" && echo "replaced" || echo "failed"'
+    stdin, stdout, stderr = ssh_client.exec_command(copy_cmd)
+    result = stdout.read().decode().strip()
+
+    if result == "replaced":
+        logger.info(f"✅ 替换成功: {source_path} -> {target_path}")
+    else:
+        err = stderr.read().decode().strip()
+        logger.error(f"❌ 替换失败: {err or '未知错误'}")
+
+    # ssh_client.close()
+    logger.success("🎉 图片替换操作完成")
 
 
 def replace_step_id_in_filenames(ssh_client, remote_dir, source_step_id, target_step_id):
@@ -259,5 +300,5 @@ def replace_step_id_in_filenames(ssh_client, remote_dir, source_step_id, target_
         ssh_client.exec_command(copy_cmd)
         logger.info(f"复制: {file_path} -> {new_path}")
 
-    ssh_client.close()
+    # ssh_client.close()
     logger.success(f"完成，共复制 {len(files)} 个文件")

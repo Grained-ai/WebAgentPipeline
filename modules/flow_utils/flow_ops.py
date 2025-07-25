@@ -1,16 +1,22 @@
+import cv2
+from PIL import Image
+import numpy as np
+from modules.media_utils.image_ops import crop_browser_from_desktop
 from modules.webagent_data_utils import WebAgentFlow, WebAgentStep
 from loguru import logger
 from pathlib import Path
 from typing import Generator, Callable, Dict, List
 import json
 from tqdm import tqdm
-import traceback
 from datetime import datetime
 import math
 import re
-from modules.linux_utils.linux_utils import init_ssh_client, list_remote_files, upload_images_to_server
-from modules.media_utils.video_ops import convert_webm_to_mp4, extract_frame_at_timestamp
-from modules.step_level_modification import extract_blank_frame, extract_blank_frame_webm
+from modules.linux_utils.linux_utils import init_ssh_client, list_remote_files, backup_existing_images, \
+    replace_image_file
+from modules.media_utils.video_ops import convert_webm_to_mp4, extract_frame_at_timestamp, extract_frame_at_timestamp_pyav
+from modules.step_level_modification import extract_blank_frame
+from scripts.archive.hl_bk.regenerate_screenshots import STORAGE_BASE
+from scripts.utilities.regenerate_screenshots import regenerate_screenshots_by_step
 
 
 ROOT_DIR = Path(__file__).parent.parent.parent
@@ -34,6 +40,11 @@ TEMP_DIR = ROOT_DIR / "temp"
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 VIDEO_DIR = Path(r"C:\Users\11627\Downloads")
 VIDEO_FILES = [p for p in VIDEO_DIR.rglob("*.webm") if p.is_file()]
+
+REMOTE_PROJ_DIR = "/var/www/html/"
+REMOTE_MARKED_IMG_DIR = "/var/www/html/storage/frames_marked"
+REMOTE_RAW_IMG_DIR = "/var/www/html/storage/frames_raw/"
+REMOTE_IMG_DIRS = [REMOTE_MARKED_IMG_DIR, REMOTE_RAW_IMG_DIR]
 
 BATCH_SIZE = 30
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -246,6 +257,7 @@ def extract_non_rect_flows(flows: List[WebAgentFlow], certain_steps_only: bool =
 
         if certain_steps_only and non_rect_steps:
             flow.to_dict()["steps"] = [step.to_dict() for step in non_rect_steps]
+            flow._steps = non_rect_steps
             non_rect_flows.append(flow)
 
     return non_rect_flows
@@ -267,6 +279,7 @@ def extract_marked_flows_without_rect(flows: List[WebAgentFlow], certain_steps_o
 
         if certain_steps_only and marked_steps_without_rect:
             flow.to_dict()["steps"] = [step.to_dict() for step in marked_steps_without_rect]
+            flow._steps = marked_steps_without_rect
             marked_flows_without_rect.append(flow)
 
     return marked_flows_without_rect
@@ -298,8 +311,8 @@ def extract_non_img_flows(flows: List[WebAgentFlow], certain_steps_only: bool = 
     non_img_flows = []
 
     ssh_client = init_ssh_client()
-    remote_img_dir = "/var/www/html/storage/frames_raw"
-    remote_imgs = list_remote_files(ssh_client, remote_img_dir)
+
+    remote_imgs = list_remote_files(ssh_client, REMOTE_RAW_IMG_DIR)
     
     exist_ids = set()
     for remote_img in remote_imgs:
@@ -322,6 +335,7 @@ def extract_non_img_flows(flows: List[WebAgentFlow], certain_steps_only: bool = 
 
         if certain_steps_only and non_img_steps:
             flow.to_dict()["steps"] = [step.to_dict() for step in non_img_steps]
+            flow._steps = non_img_steps
             non_img_flows.append(flow)
 
     return non_img_flows
@@ -344,31 +358,11 @@ def extract_is_remake_flows(flows: List[WebAgentFlow], certain_steps_only: bool 
 
             if certain_steps_only and is_remake_steps:
                 flow.to_dict()["steps"] = [step.to_dict() for step in is_remake_steps]
+                flow._steps = is_remake_steps
                 is_remake_flows.append(flow)
                 appended_flow_instructions.add(flow.title)
 
     return is_remake_flows
-
-# def extract_is_remake_steps(flows: List[WebAgentFlow]) -> List[dict]:
-#     is_remake_flows = []
-#
-#     for flow in flows:
-#         remake_steps = []
-#
-#         # 收集所有remake步骤，不要break
-#         for step in flow.steps:
-#             # logger.debug(f"Found remake step {step.to_dict()}")
-#             if step.is_remake:
-#                 # logger.debug(f"Found remake step {step.to_dict()}")
-#                 logger.info(f"Found remake step {step.id}")
-#                 remake_steps.append(step)
-#
-#         # 如果有remake步骤，创建flow字典
-#         if remake_steps:
-#             flow.to_dict()["steps"] = [step.to_dict() for step in remake_steps]
-#             is_remake_flows.append(flow)
-#
-#     return is_remake_flows
 
 def extract_select_or_drag_steps(flows: List[WebAgentFlow]) -> List[dict]:
     select_or_drag_flows = []
@@ -409,16 +403,17 @@ def sort_flows_by_host(flow_dicts: List[dict]) -> List[dict]:
     ))
 
 
-# ===================== flows特定【】截图相关方法 =====================
+# ===================== flows批量截图相关方法 =====================
 def find_video_file(recording_id: str) -> Path:
     for video_file in VIDEO_FILES:
         if recording_id in video_file.name:
             return video_file
     return None
 
-def extract_browser_screenshots(flows: list[WebAgentFlow], video_dir: Path):
-    for flow in flows:
+def extract_single_frame_from_flows(flows: list[WebAgentFlow], video_dir: Path) -> list[Path]:
+    generated_images = []
 
+    for flow in flows:
         # if flow.id not in ["lXWZIBmjtPSmqEZ0iMpFK", "eU3Js9ITplzLn-jz11Nii", "noQyaHM2Ne5aNIdECET7K"]:
         #     continue
 
@@ -429,105 +424,104 @@ def extract_browser_screenshots(flows: list[WebAgentFlow], video_dir: Path):
             if not step.recording_id:
                 continue
 
-            # if not step.is_remake:
-            #     continue
+            flow.steps[idx] = extract_blank_frame(step, storage_path=IMG_OUTPUT_DIR, video_dir=video_dir)
+            generated_images.extend(list(IMG_OUTPUT_DIR.rglob(f"{step.id}*.jpeg")))
 
-            try:
+    return generated_images
 
-                # extract_blank_frame(step, storage_path=IMG_OUTPUT_DIR, video_dir=find_video_file(step.recording_id).parent)
-
-                extract_blank_frame_webm(step, storage_path=IMG_OUTPUT_DIR, video_dir=video_dir)
-            except Exception as e:
-                logger.error(f"Error processing step {step.id}: {e}")
-                logger.debug(traceback.format_exc())
-                continue
-
-
-            # webm_video_path = find_video_file(step.recording_id)
-            #
-            # if webm_video_path is None:
-            #     logger.error(f"Could not find video file for recording_id: {step.recording_id}")
-            #     return False
-            #
-            # mp4_video_path = TEMP_DIR / f"{step.id}.mp4"
-            #
-            # try:
-            #     # 检查MP4文件是否存在，不存在才进行转换
-            #     if not mp4_video_path.exists():
-            #         logger.info(f"Converting {webm_video_path} to {mp4_video_path}")
-            #         convert_webm_to_mp4(webm_video_path, mp4_video_path)
-            #
-            #         if not mp4_video_path.exists():
-            #             logger.error(f"MP4 conversion failed for {step.recording_id}")
-            #             return False
-            #
-            #     logger.info(f"Processing step {step.id} with video {mp4_video_path}")
-            #
-            #     logger.debug(f"Generated whole images for step {step.id}")
-            #     from modules.step_level_modification import extract_blank_frame
-            #     if extract_blank_frame(step, storage_path=IMG_OUTPUT_DIR):
-            #         logger.success(f"Successfully processed step {step.id}")
-            #         # return True
-            #     else:
-            #         logger.warning(f"No screenshots generated for step {step.id} after all retry attempts")
-            #         return False
-            #
-            # except Exception as e:
-            #     logger.error(f"Error processing step {step.id}: {e}")
-            #     logger.debug(traceback.format_exc())
-            #     return False
-
-def extract_screenshots_and_upload(flows: list[WebAgentFlow]):
+def extract_candidate_frames_from_flows(flows: list[WebAgentFlow]) -> list[Path]:
+    generated_images = []
 
     for flow in flows:
-        for step in flow.steps:
-            webm_video_path = find_video_file(step.recording_id)
+        for idx, step in enumerate(flow.steps):
+            if not step.to_dict().get("isremake"):
+                continue
 
+            generated_images_per_step = []
+
+            webm_video_path = find_video_file(step.recording_id)
             if webm_video_path is None:
                 logger.error(f"Could not find video file for recording_id: {step.recording_id}")
                 return False
 
-            mp4_video_path = TEMP_DIR / f"{step.id}.mp4"
-
-            try:
-                # 检查MP4文件是否存在，不存在才进行转换
-                if not mp4_video_path.exists():
-                    logger.info(f"Converting {webm_video_path} to {mp4_video_path}")
-                    convert_webm_to_mp4(webm_video_path, mp4_video_path)
-
-                    if not mp4_video_path.exists():
-                        logger.error(f"MP4 conversion failed for {step.recording_id}")
-                        return False
-
-                logger.info(f"Processing step {step.id} with video {mp4_video_path}")
-
-                # 使用带重试机制的截图生成
-                generated_image = extract_frame_at_timestamp(
-                    mp4_video_path,
+            # Webm直接截取给定Timestamp作为candidates的第0张
+            blank_frame_webm_file = STORAGE_BASE / f"{step.id}_candidate_0_{step.calibrated_timestamp_ms}.jpeg"
+            if not blank_frame_webm_file.exists():
+                blank_frame_webm = extract_frame_at_timestamp_pyav(
+                    webm_video_path,
                     step.calibrated_timestamp_ms,
-                    IMG_OUTPUT_DIR / f"{step.id}.jpeg",
+                    blank_frame_webm_file,
                 )
+                if step.to_dict().get("recordingWindowRect"):
+                    # 完整桌面中截取出浏览器
+                    blank_frame_webm = crop_browser_from_desktop(blank_frame_webm, step.to_dict()["recordingWindowRect"], step.browser_top_height, step.viewport)["full_browser"]
 
-                if generated_image:
-                    logger.debug(f"Generated {len(generated_image)} images for step {step.id}")
+                target_w = int(step.viewport['width'] * step.device_pixel_ratio)
+                orig_h, orig_w = blank_frame_webm.shape[:2]
+                scale_ratio = target_w / orig_w
+                target_h = int(orig_h * scale_ratio)
 
-                    # 上传图片到服务器
-                    uploaded_image_names = upload_images_to_server([generated_image])
+                resized = Image.fromarray(cv2.cvtColor(blank_frame_webm, cv2.COLOR_BGR2RGB)).resize((target_w, target_h), Image.Resampling.LANCZOS)
+                frame = cv2.cvtColor(np.array(resized), cv2.COLOR_RGB2BGR)
 
-                    # 将生成的截图路径存储到step的candidates字段
-                    step.to_dict()["screenshot_options"] = ["http://3.145.59.104/pickimgjson/hl/" + name for name in
-                                                            uploaded_image_names]
+                cv2.imwrite(str(blank_frame_webm_file), frame.copy())
+            if blank_frame_webm_file.exists():
+                generated_images_per_step.append(blank_frame_webm_file)
 
-                    logger.success(f"Successfully processed step {step.id}")
-                    return True
-                else:
-                    logger.warning(f"No screenshots generated for step {step.id} after all retry attempts")
+            # MP4截取candidates
+            mp4_video_path = webm_video_path.parent / f"{step.recording_id}.mp4"
+            if not mp4_video_path.exists():
+                logger.info(f"Converting {webm_video_path} to {mp4_video_path}")
+                convert_webm_to_mp4(webm_video_path, mp4_video_path)
+
+                if not mp4_video_path.exists():
+                    logger.error(f"MP4 conversion failed for {step.id}")
                     return False
 
-            except Exception as e:
-                logger.error(f"Error processing step {step.id}: {e}")
-                logger.debug(traceback.format_exc())
-                return False
+            logger.info(f"Processing step {step.id} with video {mp4_video_path}")
+            generated_images_per_step.extend(regenerate_screenshots_by_step(step, mp4_video_path))
+
+            if generated_images_per_step:
+                # 将生成的截图路径存储到step的candidates字段
+                step.to_dict()["screenshot_options"] = ["http://3.145.59.104/pickimgjson/hl/" + generated_image.name for generated_image in generated_images_per_step]
+
+                logger.success(f"Successfully processed step {step.id}")
+
+            generated_images.extend(generated_images_per_step)
+
+    return generated_images
+
+def copy_pick_img_from_flows(flows: List[WebAgentFlow]) -> list[Path]:
+    # 1. 收集step.ids 和 pickimgs
+    # 2. 备份 frames_raw/{step.id}_scaled*.jpeg -> frames_raw/{step.id}_scaled*_bak.jpeg
+    # 3. pickimgs 重命名到 frames_raw/{step.id}_scaled.jpeg
+
+    # pick_imgs = [step.to_dict().get("pickimg") for flow in flows for step in flow.steps]
+    pick_imgs = []
+    step_ids = []
+    is_negative_timestamps = []
+    for flow in flows:
+        for step in flow.steps:
+            if step.to_dict().get("pickimg"):
+                pick_imgs.append(step.to_dict().get("pickimg"))
+                step_ids.append(step.id)
+                is_negative_timestamps.append(step.timestamp < 0)
+            else:
+                logger.critical(f"⌈{flow.title}⌋ - ⌈{step.title}⌋ no pickimg!!!")
+
+    try:
+        ssh_client = init_ssh_client()
+
+        for step_id, pick_img, is_negative_timestamp in zip(step_ids, pick_imgs, is_negative_timestamps):
+            backup_existing_images(ssh_client, REMOTE_RAW_IMG_DIR, step_id + "_scaled")
+
+            pick_img_file = "/".join(pick_img.split("/")[-3:])
+            source_img_file = REMOTE_PROJ_DIR + pick_img_file
+            dst_img_file = REMOTE_RAW_IMG_DIR + f"{step_id}_scaled{'2' if is_negative_timestamp else ''}.jpeg"
+
+            replace_image_file(ssh_client, source_img_file, dst_img_file)
+    finally:
+        ssh_client.close()
 
 
 # ===================== 其它方法 =====================
