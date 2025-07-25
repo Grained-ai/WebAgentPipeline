@@ -6,3 +6,6 @@ VLM:
 ChromeDriver:
   driver_executable_path:
   version_main:
+ Feishu:
+  app_id:
+  app_secret:

@@ -187,6 +187,102 @@ def extract_frame_at_timestamp(video_path: Path | str,
     return frame
 
 
+def extract_frame_at_timestamp_pyav(video_path: Path | str,
+                                    timestamp_ms: int,
+                                    output_image_path: Path) -> np.ndarray | None:
+    import av
+    """
+    修复的 PyAV 帧提取器 - 立即转换帧数据
+    """
+    try:
+        with av.open(str(video_path)) as container:
+            if not container.streams.video:
+                logger.error("无视频流")
+                return None
+
+            video_stream = container.streams.video[0]
+            target_sec = timestamp_ms / 1000.0
+
+            logger.info(f"开始逐帧扫描，目标时间: {target_sec:.2f}s")
+
+            # 重置到开头
+            container.seek(0)
+
+            best_frame_array = None
+            best_diff = float('inf')
+            frame_count = 0
+            estimated_fps = 25.0  # 默认帧率
+
+            for frame in container.decode(video_stream):
+                frame_count += 1
+
+                # 计算当前时间
+                if frame.pts is not None and video_stream.time_base is not None:
+                    try:
+                        current_time_sec = float(frame.pts * video_stream.time_base)
+                    except:
+                        current_time_sec = frame_count / estimated_fps
+                else:
+                    current_time_sec = frame_count / estimated_fps
+
+                diff = abs(current_time_sec - target_sec)
+
+                # 如果找到更好的匹配，立即转换为 numpy 数组保存
+                if diff < best_diff:
+                    try:
+                        # 立即转换帧数据，避免被后续循环覆盖
+                        frame_array = frame.to_ndarray(format='bgr24')
+                        best_frame_array = frame_array.copy()  # numpy 数组可以 copy
+                        best_diff = diff
+                        logger.debug(f"更好匹配: 帧{frame_count}, 时间={current_time_sec:.2f}s, 差异={diff:.3f}s")
+                    except Exception as e:
+                        logger.warning(f"帧转换失败: {e}")
+                        continue
+
+                # 进度报告
+                if frame_count % 50 == 0:
+                    logger.debug(f"扫描进度: {frame_count}帧, {current_time_sec:.1f}s")
+
+                # 提前退出条件
+                if current_time_sec > target_sec + 3.0:
+                    logger.info(f"时间已超过目标，停止扫描")
+                    break
+
+                if diff < 0.05:  # 找到50ms内的精确匹配
+                    logger.info(f"找到精确匹配，停止扫描")
+                    break
+
+                if frame_count > 999999999:  # 防止扫描过久
+                    logger.warning(f"已扫描1000帧，强制停止")
+                    break
+
+            # 处理结果
+            if best_frame_array is None:
+                logger.error("未找到任何有效帧")
+                return None
+
+            # 保存文件
+            try:
+                output_image_path = Path(output_image_path)
+                output_image_path.parent.mkdir(parents=True, exist_ok=True)
+
+                success = cv2.imwrite(str(output_image_path), best_frame_array)
+                if success:
+                    logger.success(f"PyAV提取成功: 差异{best_diff:.3f}s, 文件: {output_image_path}")
+                    return best_frame_array
+                else:
+                    logger.error("保存图片文件失败")
+                    return None
+
+            except Exception as e:
+                logger.error(f"保存文件失败: {e}")
+                return None
+
+    except Exception as e:
+        logger.error(f"PyAV异常: {e}")
+        return None
+
+
 # # 为向后兼容保留旧函数名
 # extract_frame_webm_at_timestamp = extract_frame_at_timestamp
 
