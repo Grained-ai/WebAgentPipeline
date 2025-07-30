@@ -186,17 +186,21 @@ def label_bbox(step: WebAgentStep, **kwargs) -> WebAgentStep:
         logger.warning("Scroll full screen. Will adjust rect automatically")
         step.rect["top"] = 0
 
-    if step.type.lower() not in ['launchapp'] or 'end' in step.title.lower():
+    if step.type.lower() not in ['launchapp', 'press_enter', 'end'] or 'end' not in step.title.lower():
         if step.recrop_rect:
             image = Image.open(str(img_path))
             mark_redo_bbox(image, step.recrop_rect)
             logger.debug("Using Annotations.")
             image.save(output_path)
 
-        else:
+        elif step.adjusted_rect:
             frame = cv2.imread(str(img_path))
             frame = mark_click_position(frame, None, None, step.adjusted_rect)
             logger.debug("Using cv2 bbox.")
+            cv2.imwrite(output_path, frame)
+        else:
+            logger.warning(f"No rect. {step.recrop_rect}")
+            frame = cv2.imread(str(img_path))
             cv2.imwrite(output_path, frame)
     else:
         logger.info(f"{step.type}: {step.title} => Set to default screenshot.")

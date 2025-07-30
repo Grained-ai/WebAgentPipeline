@@ -169,7 +169,7 @@ class WebAgentStep:
 
     @property
     def recrop_rect(self):
-        return self._step_dict.get('annotations', None)
+        return self._step_dict.get('annotations', None) if self._step_dict.get('annotations', None) else self._step_dict.get('recrop_rect', None)
 
     @recrop_rect.setter
     def recrop_rect(self, annotations):

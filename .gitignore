@@ -189,3 +189,5 @@ src
 *.xlsx
 *.csv
 scripts/archive/*
+
+**/outputs

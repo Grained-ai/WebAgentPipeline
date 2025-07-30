@@ -1,0 +1,42 @@
+从文件提取的网站列表
+文件: /Users/anthonyf/projects/grainedAI/WebAgentPipeline/scripts/data_files/QC_WebAgent_交付表_20250714_交付表.xlsx
+提取时间: 2025-07-16 16:04:19.935272
+总计: 36 个唯一网站
+
+网站列表:
+  1. agoda
+  2. airbnb
+  3. amazon
+  4. booking
+  5. cnbc
+  6. delta
+  7. ebay
+  8. etsy
+  9. eventbrite
+ 10. hotels
+ 11. ikea
+ 12. kayak
+ 13. kohls
+ 14. macys
+ 15. newegg
+ 16. nytimes
+ 17. opentable
+ 18. parking
+ 19. qatarairways
+ 20. recreation
+ 21. reddit
+ 22. redfin
+ 23. rei
+ 24. ryanair
+ 25. shop
+ 26. steampowered
+ 27. stubhub
+ 28. target
+ 29. temu
+ 30. trip
+ 31. united
+ 32. walmart
+ 33. weather
+ 34. wsj
+ 35. x
+ 36. yelp
